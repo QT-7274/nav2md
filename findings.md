@@ -40,3 +40,21 @@
 - Repository name: `nav2md`
 - GitHub remote: `https://github.com/QT-7274/nav2md.git`
 
+## Implementation Findings
+
+### Initial execution choice
+
+- Chose a native Manifest V3 extension skeleton first instead of immediately adding Vite or TypeScript.
+- Reason: fastest route to validate action toggle, content script injection, and in-page overlay behavior.
+- This can be upgraded later once the core interaction path is proven.
+
+### Current runtime behavior
+
+- Selection mode is toggled from the extension action through the service worker.
+- The content script shows:
+  - a hover highlight box
+  - an overlay panel
+  - selected item count
+  - selected item list
+  - a `Start export` button
+- Export currently sends normalized task payloads to the background worker and logs receipt there.

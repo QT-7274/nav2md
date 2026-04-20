@@ -6,8 +6,8 @@ Build the MVP of `nav2md`: a Chrome extension that lets the user select left-sid
 
 ## Current Status
 
-- Phase 1: Repository bootstrap and project skeleton — pending
-- Phase 2: Extension selection-mode foundation — pending
+- Phase 1: Repository bootstrap and project skeleton — in_progress
+- Phase 2: Extension selection-mode foundation — in_progress
 - Phase 3: Export job orchestration and extraction pipeline — pending
 - Phase 4: Zip export, manifest, and progress UI — pending
 - Phase 5: Validation on representative docs sites — pending
@@ -40,6 +40,13 @@ Build the MVP of `nav2md`: a Chrome extension that lets the user select left-sid
 - Add baseline scripts, linting, and build flow
 - Confirm extension loads in Chrome dev mode
 
+Progress notes:
+
+- Chose a zero-build native Chrome extension skeleton for the first vertical slice to reduce startup friction.
+- Added `manifest.json`, a service worker entry, a content script entry, overlay styles, and a README load path.
+- Static validation passed for `manifest.json`.
+- Remaining Phase 1 check: load the unpacked extension in Chrome and confirm the action toggles the page overlay.
+
 ### Phase 2: Extension Selection-Mode Foundation
 
 - Implement service worker action toggle
@@ -47,6 +54,15 @@ Build the MVP of `nav2md`: a Chrome extension that lets the user select left-sid
 - Build left-nav candidate detection
 - Add hover, select, deselect, and selected-item state
 - Add minimal in-page overlay controls
+
+Progress notes:
+
+- Action click now toggles selection mode through the service worker.
+- Content script injects an overlay panel and hover highlight box.
+- Candidate detection currently prefers anchor-based targets.
+- Multi-select, deselect, selected-count display, and selected-item list are in place.
+- `Start export` now converts selections into normalized task payloads and sends them to the background worker.
+- Remaining Phase 2 check: validate real docs-site behavior in Chrome and tighten candidate filtering for left-nav-heavy layouts.
 
 ### Phase 3: Export Job Orchestration and Extraction Pipeline
 

@@ -91,21 +91,32 @@ function updatePanel() {
   if (exportButtonNode) exportButtonNode.disabled = selectedItems.size === 0;
   if (!selectedListNode) return;
 
+  selectedListNode.replaceChildren();
+
   if (selectedItems.size === 0) {
-    selectedListNode.innerHTML = `<div class="nav2md-panel__empty">No items selected yet.</div>`;
+    const emptyNode = document.createElement("div");
+    emptyNode.className = "nav2md-panel__empty";
+    emptyNode.textContent = "No items selected yet.";
+    selectedListNode.appendChild(emptyNode);
     return;
   }
 
-  selectedListNode.innerHTML = Array.from(selectedItems.values())
-    .map(
-      (item) => `
-        <div class="nav2md-panel__item" title="${item.href}">
-          <div class="nav2md-panel__item-title">${item.text}</div>
-          <div class="nav2md-panel__item-url">${item.href}</div>
-        </div>
-      `
-    )
-    .join("");
+  Array.from(selectedItems.values()).forEach((item) => {
+    const itemNode = document.createElement("div");
+    itemNode.className = "nav2md-panel__item";
+    itemNode.title = item.href;
+
+    const titleNode = document.createElement("div");
+    titleNode.className = "nav2md-panel__item-title";
+    titleNode.textContent = item.text;
+
+    const urlNode = document.createElement("div");
+    urlNode.className = "nav2md-panel__item-url";
+    urlNode.textContent = item.href;
+
+    itemNode.append(titleNode, urlNode);
+    selectedListNode.appendChild(itemNode);
+  });
 }
 
 function resolveCandidate(target) {
@@ -175,12 +186,16 @@ function handleMouseMove(event) {
 }
 
 function handleClick(event) {
-  if (!selectionEnabled || !currentTarget) return;
+  if (!selectionEnabled) return;
   if (isWithinExtension(event.target)) return;
+
+  const clickedTarget = resolveCandidate(event.target);
+  if (!clickedTarget) return;
 
   event.preventDefault();
   event.stopPropagation();
-  toggleSelectedItem(currentTarget);
+  currentTarget = clickedTarget;
+  toggleSelectedItem(clickedTarget);
 }
 
 function setSelectionMode(enabled) {

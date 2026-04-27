@@ -24,7 +24,7 @@ interface ExportJob {
 }
 
 interface CaptureTaskResult {
-  captureTabId: number;
+  captureTabId: number | null;
   result: ExportResult;
 }
 
@@ -198,6 +198,40 @@ function waitForTabComplete(tabId: number) {
   };
 }
 
+function normalizeComparableUrl(value: string) {
+  try {
+    return new URL(value).href;
+  } catch (_error) {
+    return "";
+  }
+}
+
+function isInjectableUrl(value: string | undefined) {
+  if (!value) return false;
+
+  try {
+    return ["http:", "https:", "file:"].includes(new URL(value).protocol);
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function findOpenTabForUrl(url: string, excludedTabId: number | null) {
+  const comparableUrl = normalizeComparableUrl(url);
+  if (!comparableUrl) return null;
+
+  const tabs = await chrome.tabs.query({});
+  return (
+    tabs.find((tab) => {
+      if (typeof tab.id !== "number" || !Number.isInteger(tab.id)) return false;
+      if (tab.id === excludedTabId) return false;
+      if (!isInjectableUrl(tab.url)) return false;
+
+      return normalizeComparableUrl(tab.url || "") === comparableUrl;
+    }) || null
+  );
+}
+
 async function createOrUpdateCaptureTab(captureTabId: number | null, url: string) {
   let targetTabId: number | null = captureTabId;
 
@@ -238,47 +272,95 @@ async function navigateCaptureTab(tabId: number, url: string) {
 }
 
 async function captureTask(task: ExportTask, captureTabId: number | null): Promise<CaptureTaskResult> {
+  const openTab = await findOpenTabForUrl(task.url, captureTabId);
+  if (openTab?.id) {
+    try {
+      if (openTab.status === "loading") {
+        const loading = waitForTabComplete(openTab.id);
+        try {
+          await loading.promise;
+        } finally {
+          loading.dispose();
+        }
+      }
+
+      await delay(CAPTURE_STABILIZE_MS);
+
+      const openTabResult = await extractTaskFromTab(task, openTab.id, "open-tab");
+      if (openTabResult.ok) {
+        return {
+          captureTabId,
+          result: openTabResult
+        };
+      }
+
+      console.debug("nav2md open tab extraction returned a failure, falling back to capture tab", {
+        taskId: task.id,
+        tabId: openTab.id,
+        reason: openTabResult.reason,
+        message: openTabResult.message,
+        diagnostics: openTabResult.diagnostics || null
+      });
+
+    } catch (error) {
+      console.debug("nav2md open tab capture failed, falling back to capture tab", {
+        taskId: task.id,
+        tabId: openTab.id,
+        message: getErrorMessage(error)
+      });
+    }
+  }
+
   const nextCaptureTabId = await createOrUpdateCaptureTab(captureTabId, task.url);
   await delay(CAPTURE_STABILIZE_MS);
 
+  return {
+    captureTabId: nextCaptureTabId,
+    result: await extractTaskFromTab(task, nextCaptureTabId, "capture-tab")
+  };
+}
+
+async function extractTaskFromTab(
+  task: ExportTask,
+  tabId: number,
+  captureSource: "open-tab" | "capture-tab"
+): Promise<ExportResult> {
   await chrome.scripting.executeScript({
-    target: { tabId: nextCaptureTabId },
+    target: { tabId },
     files: [EXTRACTOR_SCRIPT_FILE]
   });
 
   const injectionResults = await chrome.scripting.executeScript({
-    target: { tabId: nextCaptureTabId },
+    target: { tabId },
     func: runInjectedPageExtractor
   });
   const extraction = injectionResults?.[0]?.result as ExtractionResult | undefined;
 
   if (!extraction?.ok) {
     return {
-      captureTabId: nextCaptureTabId,
-      result: {
-        ok: false,
-        reason: extraction?.reason || "extraction-failed",
-        message: extraction?.message || "Could not extract docs content.",
-        taskId: task.id,
-        url: task.url,
-        diagnostics: extraction || null
+      ok: false,
+      reason: extraction?.reason || "extraction-failed",
+      message: extraction?.message || "Could not extract docs content.",
+      taskId: task.id,
+      url: task.url,
+      diagnostics: {
+        captureSource,
+        extraction: extraction || null
       }
     };
   }
 
   return {
-    captureTabId: nextCaptureTabId,
-    result: {
-      ok: true,
-      taskId: task.id,
-      url: extraction.url || task.url,
-      title: extraction.title || task.title,
-      markdown: extraction.markdown,
-      diagnostics: {
-        selector: extraction.selector,
-        htmlLength: extraction.htmlLength,
-        markdownLength: extraction.markdownLength
-      }
+    ok: true,
+    taskId: task.id,
+    url: extraction.url || task.url,
+    title: extraction.title || task.title,
+    markdown: extraction.markdown,
+    diagnostics: {
+      captureSource,
+      selector: extraction.selector,
+      htmlLength: extraction.htmlLength,
+      markdownLength: extraction.markdownLength
     }
   };
 }

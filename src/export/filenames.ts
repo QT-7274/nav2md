@@ -1,23 +1,39 @@
 import type { ExportTask } from "../shared/types";
 
-export function createMarkdownFilenames(tasks: ExportTask[]): string[] {
-  const used = new Map<string, number>();
+interface CreateMarkdownFilenameOptions {
+  reservedFilenames?: string[];
+}
+
+export function createMarkdownFilenames(
+  tasks: ExportTask[],
+  options: CreateMarkdownFilenameOptions = {}
+): string[] {
+  const used = new Set(options.reservedFilenames || []);
 
   return tasks.map((task) => {
-    const base = slugify(task.title || task.url || task.id) || `doc-${task.order || 1}`;
-    const count = used.get(base) || 0;
-    used.set(base, count + 1);
-    return count === 0 ? `${base}.md` : `${base}-${count + 1}.md`;
+    const selectedTitle = task.sourceTextPath.at(-1) || task.title;
+    const base = toSafeMarkdownBasename(selectedTitle || task.url || task.id) || `doc-${task.order || 1}`;
+    let suffix = 1;
+    let filename = `${base}.md`;
+
+    while (used.has(filename)) {
+      suffix += 1;
+      filename = `${base}-${suffix}.md`;
+    }
+
+    used.add(filename);
+    return filename;
   });
 }
 
-function slugify(value: string) {
+function toSafeMarkdownBasename(value: string) {
   return String(value)
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/https?:\/\//g, "")
-    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "-")
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
 }

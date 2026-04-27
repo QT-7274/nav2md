@@ -8,7 +8,8 @@ function copyExtensionAssets() {
     closeBundle() {
       const files = [
         ["manifest.json", "dist/manifest.json"],
-        ["src/content/overlay.css", "dist/src/content/overlay.css"]
+        ["src/content/overlay.css", "dist/src/content/overlay.css"],
+        ["src/offscreen/blob-download.html", "dist/src/offscreen/blob-download.html"]
       ] as const;
 
       for (const [from, to] of files) {
@@ -29,7 +30,8 @@ export default defineConfig({
       input: {
         "src/background/service-worker": resolve(__dirname, "src/background/service-worker.ts"),
         "src/content/index": resolve(__dirname, "src/content/index.ts"),
-        "src/extractor/page-extractor": resolve(__dirname, "src/extractor/page-extractor.ts")
+        "src/extractor/page-extractor": resolve(__dirname, "src/extractor/page-extractor.ts"),
+        "src/offscreen/blob-download": resolve(__dirname, "src/offscreen/blob-download.ts")
       },
       output: {
         entryFileNames: "[name].js",

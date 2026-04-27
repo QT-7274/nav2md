@@ -404,6 +404,21 @@ async function runExportJob(job: ExportJob) {
   let manifest: ExportManifest | null = null;
   try {
     manifest = await downloadZip(job, items);
+  } catch (error) {
+    await sendProgress(job.sourceTabId, {
+      phase: "error",
+      jobId: job.id,
+      reason: "download-failed",
+      message: getErrorMessage(error),
+      total,
+      success: items.filter((item) => item.result.ok).length,
+      failed: items.filter((item) => !item.result.ok).length
+    });
+    console.error("nav2md export download failed", {
+      jobId: job.id,
+      message: getErrorMessage(error)
+    });
+    return;
   } finally {
     if (typeof captureTabId === "number" && Number.isInteger(captureTabId)) {
       chrome.tabs.remove(captureTabId).catch(() => {});
@@ -437,15 +452,13 @@ async function runJobAndRelease(job: ExportJob) {
     });
 
     await sendProgress(job.sourceTabId, {
-      phase: "finished",
+      phase: "error",
       jobId: job.id,
+      reason: "job-runtime-error",
+      message: getErrorMessage(error),
       total: job.tasks.length,
       success: 0,
-      failed: job.tasks.length,
-      error: {
-        reason: "job-runtime-error",
-        message: getErrorMessage(error)
-      }
+      failed: job.tasks.length
     });
   } finally {
     if (activeJob?.id === job.id) activeJob = null;

@@ -30,6 +30,10 @@ interface ExportProgressMessage {
   result?: {
     ok?: boolean;
   };
+  error?: {
+    reason?: string;
+    message?: string;
+  };
 }
 
 let selectionEnabled = false;
@@ -363,6 +367,15 @@ function handleExportProgress(message: ExportProgressMessage) {
   }
 
   if (message.phase === "finished") {
+    if (message.error) {
+      setExportStatus({
+        running: false,
+        status: "Export error",
+        progress: message.error.message || message.error.reason || "Unknown error"
+      });
+      return;
+    }
+
     setExportStatus({
       running: false,
       status: "Export finished",

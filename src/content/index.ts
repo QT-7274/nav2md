@@ -49,6 +49,11 @@ let exportButtonNode: HTMLButtonElement | null = null;
 const selectedItems = new Map<string, SelectedItem>();
 let exportRunning = false;
 
+const PANEL_MARGIN_PX = 16;
+const PANEL_GAP_PX = 12;
+const NAV_CONTAINER_SELECTOR =
+  "aside, nav, [role='navigation'], [role='tree'], [class*='sidebar' i], [class*='sidenav' i], [class*='side-nav' i], [class*='docs-nav' i]";
+
 function isWithinExtension(node: EventTarget | null) {
   return node instanceof Element && node.closest(`#${ROOT_ID}`);
 }
@@ -150,6 +155,8 @@ function setExportStatus({ running, status, progress }: ExportStatus) {
 }
 
 function updatePanel() {
+  repositionPanel();
+
   if (countNode) countNode.textContent = String(selectedItems.size);
   if (exportButtonNode) {
     exportButtonNode.disabled = selectedItems.size === 0 || exportRunning;
@@ -184,6 +191,72 @@ function updatePanel() {
     itemNode.append(titleNode, urlNode);
     listNode.appendChild(itemNode);
   });
+}
+
+function isVisibleNavContainer(element: Element) {
+  if (isWithinExtension(element)) return false;
+
+  const rect = element.getBoundingClientRect();
+  const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+  const viewportHeight = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+
+  if (rect.width < 120 || rect.height < 160) return false;
+  if (rect.bottom <= 0 || rect.top >= viewportHeight) return false;
+  if (rect.right <= 0 || rect.left >= viewportWidth) return false;
+  if (rect.left > viewportWidth * 0.45) return false;
+
+  return true;
+}
+
+function scoreNavContainer(element: Element) {
+  const rect = element.getBoundingClientRect();
+  const tagScore = element.tagName.toLowerCase() === "aside" ? 200 : 0;
+  const roleScore = element.getAttribute("role") === "navigation" ? 80 : 0;
+  const heightScore = Math.min(rect.height, 900) / 6;
+  const leftPenalty = Math.max(rect.left, 0) / 2;
+
+  return tagScore + roleScore + heightScore - leftPenalty;
+}
+
+function findBestNavContainer() {
+  const candidates = Array.from(document.querySelectorAll(NAV_CONTAINER_SELECTOR)).filter(
+    isVisibleNavContainer
+  );
+
+  return candidates.sort((a, b) => scoreNavContainer(b) - scoreNavContainer(a))[0] || null;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function repositionPanel() {
+  if (!selectionEnabled || !panelNode) return;
+
+  const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+  const viewportHeight = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+  const panelWidth = panelNode.offsetWidth || 220;
+  const panelHeight = panelNode.offsetHeight || 240;
+  const fallbackLeft = Math.max(PANEL_MARGIN_PX, viewportWidth - panelWidth - PANEL_MARGIN_PX);
+  const fallbackTop = PANEL_MARGIN_PX;
+  const navContainer = findBestNavContainer();
+
+  let left = fallbackLeft;
+  let top = fallbackTop;
+
+  if (navContainer) {
+    const rect = navContainer.getBoundingClientRect();
+    const desiredLeft = rect.right + PANEL_GAP_PX;
+    const maxLeft = viewportWidth - panelWidth - PANEL_MARGIN_PX;
+
+    if (desiredLeft <= maxLeft) {
+      left = desiredLeft;
+      top = clamp(rect.top, PANEL_MARGIN_PX, viewportHeight - panelHeight - PANEL_MARGIN_PX);
+    }
+  }
+
+  panelNode.style.left = `${Math.round(left)}px`;
+  panelNode.style.top = `${Math.round(top)}px`;
 }
 
 function resolveCandidate(target: EventTarget | null): HTMLAnchorElement | null {
@@ -310,6 +383,8 @@ function setSelectionMode(enabled: boolean) {
 
 document.addEventListener("mousemove", handleMouseMove, true);
 document.addEventListener("click", handleClick, true);
+window.addEventListener("resize", repositionPanel, { passive: true });
+window.addEventListener("scroll", repositionPanel, { passive: true });
 
 chrome.runtime.onMessage.addListener((rawMessage, _sender, sendResponse) => {
   const message = rawMessage as { type?: string; enabled?: boolean } | ExportProgressMessage;

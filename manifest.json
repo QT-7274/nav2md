@@ -3,7 +3,7 @@
   "name": "nav2md",
   "version": "0.1.0",
   "description": "Select docs navigation items and export them to Markdown.",
-  "permissions": ["activeTab", "scripting", "tabs", "storage"],
+  "permissions": ["activeTab", "scripting", "tabs", "storage", "downloads"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "src/background/service-worker.js",
@@ -22,7 +22,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": [],
+      "resources": ["src/extractor/page-extractor.js", "assets/*.js"],
       "matches": ["<all_urls>"]
     }
   ]

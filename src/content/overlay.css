@@ -40,6 +40,16 @@
   font-size: 12px;
 }
 
+.nav2md-panel__progress {
+  margin-top: 10px;
+  border-radius: 10px;
+  background: #ecfdf5;
+  padding: 8px 10px;
+  color: #047857;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .nav2md-panel__count-label {
   color: #475569;
 }

@@ -286,10 +286,22 @@ async function captureTask(task: ExportTask, captureTabId: number | null): Promi
 
       await delay(CAPTURE_STABILIZE_MS);
 
-      return {
-        captureTabId,
-        result: await extractTaskFromTab(task, openTab.id, "open-tab")
-      };
+      const openTabResult = await extractTaskFromTab(task, openTab.id, "open-tab");
+      if (openTabResult.ok) {
+        return {
+          captureTabId,
+          result: openTabResult
+        };
+      }
+
+      console.debug("nav2md open tab extraction returned a failure, falling back to capture tab", {
+        taskId: task.id,
+        tabId: openTab.id,
+        reason: openTabResult.reason,
+        message: openTabResult.message,
+        diagnostics: openTabResult.diagnostics || null
+      });
+
     } catch (error) {
       console.debug("nav2md open tab capture failed, falling back to capture tab", {
         taskId: task.id,

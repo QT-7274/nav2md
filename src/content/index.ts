@@ -48,6 +48,9 @@ let selectedListNode: HTMLElement | null = null;
 let exportButtonNode: HTMLButtonElement | null = null;
 const selectedItems = new Map<string, SelectedItem>();
 let exportRunning = false;
+let cachedNavContainer: Element | null = null;
+let repositionFrameId: number | null = null;
+let shouldRefreshNavContainer = false;
 
 const PANEL_MARGIN_PX = 16;
 const PANEL_GAP_PX = 12;
@@ -218,28 +221,44 @@ function scoreNavContainer(element: Element) {
   return tagScore + roleScore + heightScore - leftPenalty;
 }
 
-function findBestNavContainer() {
-  const candidates = Array.from(document.querySelectorAll(NAV_CONTAINER_SELECTOR)).filter(
-    isVisibleNavContainer
-  );
+function findBestNavContainer(refresh = false) {
+  if (!refresh && cachedNavContainer?.isConnected && isVisibleNavContainer(cachedNavContainer)) {
+    return cachedNavContainer;
+  }
 
-  return candidates.sort((a, b) => scoreNavContainer(b) - scoreNavContainer(a))[0] || null;
+  let bestContainer: Element | null = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  document.querySelectorAll(NAV_CONTAINER_SELECTOR).forEach((candidate) => {
+    if (!isVisibleNavContainer(candidate)) return;
+
+    const score = scoreNavContainer(candidate);
+    if (score > bestScore) {
+      bestContainer = candidate;
+      bestScore = score;
+    }
+  });
+
+  cachedNavContainer = bestContainer;
+  return bestContainer;
 }
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-function repositionPanel() {
+function repositionPanel(refreshNavContainer = false) {
   if (!selectionEnabled || !panelNode) return;
 
   const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
   const viewportHeight = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
   const panelWidth = panelNode.offsetWidth || 220;
   const panelHeight = panelNode.offsetHeight || 240;
-  const fallbackLeft = Math.max(PANEL_MARGIN_PX, viewportWidth - panelWidth - PANEL_MARGIN_PX);
+  const maxLeft = Math.max(PANEL_MARGIN_PX, viewportWidth - panelWidth - PANEL_MARGIN_PX);
+  const maxTop = Math.max(PANEL_MARGIN_PX, viewportHeight - panelHeight - PANEL_MARGIN_PX);
+  const fallbackLeft = maxLeft;
   const fallbackTop = PANEL_MARGIN_PX;
-  const navContainer = findBestNavContainer();
+  const navContainer = findBestNavContainer(refreshNavContainer);
 
   let left = fallbackLeft;
   let top = fallbackTop;
@@ -247,16 +266,27 @@ function repositionPanel() {
   if (navContainer) {
     const rect = navContainer.getBoundingClientRect();
     const desiredLeft = rect.right + PANEL_GAP_PX;
-    const maxLeft = viewportWidth - panelWidth - PANEL_MARGIN_PX;
 
     if (desiredLeft <= maxLeft) {
       left = desiredLeft;
-      top = clamp(rect.top, PANEL_MARGIN_PX, viewportHeight - panelHeight - PANEL_MARGIN_PX);
+      top = clamp(rect.top, PANEL_MARGIN_PX, maxTop);
     }
   }
 
   panelNode.style.left = `${Math.round(left)}px`;
   panelNode.style.top = `${Math.round(top)}px`;
+}
+
+function scheduleRepositionPanel(refreshNavContainer = false) {
+  shouldRefreshNavContainer = shouldRefreshNavContainer || refreshNavContainer;
+  if (repositionFrameId !== null) return;
+
+  repositionFrameId = requestAnimationFrame(() => {
+    const refresh = shouldRefreshNavContainer;
+    repositionFrameId = null;
+    shouldRefreshNavContainer = false;
+    repositionPanel(refresh);
+  });
 }
 
 function resolveCandidate(target: EventTarget | null): HTMLAnchorElement | null {
@@ -364,6 +394,7 @@ function setSelectionMode(enabled: boolean) {
 
   if (panelNode) panelNode.hidden = !enabled;
   if (!enabled) {
+    cachedNavContainer = null;
     currentTarget = null;
     exportRunning = false;
     updateHoverBox(null);
@@ -377,14 +408,15 @@ function setSelectionMode(enabled: boolean) {
     updatePanel();
     chrome.runtime.sendMessage({ type: "NAV2MD_SELECTION_MODE_CLOSED" }).catch(() => {});
   } else {
+    cachedNavContainer = null;
     updatePanel();
   }
 }
 
 document.addEventListener("mousemove", handleMouseMove, true);
 document.addEventListener("click", handleClick, true);
-window.addEventListener("resize", repositionPanel, { passive: true });
-window.addEventListener("scroll", repositionPanel, { passive: true });
+window.addEventListener("resize", () => scheduleRepositionPanel(true), { passive: true });
+window.addEventListener("scroll", () => scheduleRepositionPanel(), { passive: true });
 
 chrome.runtime.onMessage.addListener((rawMessage, _sender, sendResponse) => {
   const message = rawMessage as { type?: string; enabled?: boolean } | ExportProgressMessage;

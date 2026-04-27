@@ -156,21 +156,46 @@ function delay(ms: number) {
 }
 
 function waitForTabComplete(tabId: number) {
-  return new Promise<void>((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(handleUpdated);
-      reject(new Error("Timed out waiting for capture tab to finish loading."));
-    }, CAPTURE_TIMEOUT_MS);
+  let settled = false;
 
-    function handleUpdated(updatedTabId: number, changeInfo: { status?: string }) {
-      if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
-      clearTimeout(timeoutId);
-      chrome.tabs.onUpdated.removeListener(handleUpdated);
-      resolve();
-    }
+  function cleanup() {
+    clearTimeout(timeoutId);
+    chrome.tabs.onUpdated.removeListener(handleUpdated);
+  }
 
-    chrome.tabs.onUpdated.addListener(handleUpdated);
+  function handleUpdated(updatedTabId: number, changeInfo: { status?: string }) {
+    if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
+    cleanup();
+    settled = true;
+    resolvePromise();
+  }
+
+  let resolvePromise: () => void = () => {};
+  let rejectPromise: (error: Error) => void = () => {};
+
+  const timeoutId = setTimeout(() => {
+    if (settled) return;
+    cleanup();
+    settled = true;
+    rejectPromise(new Error("Timed out waiting for capture tab to finish loading."));
+  }, CAPTURE_TIMEOUT_MS);
+
+  const promise = new Promise<void>((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
   });
+
+  chrome.tabs.onUpdated.addListener(handleUpdated);
+
+  return {
+    promise,
+    dispose() {
+      if (!settled) {
+        settled = true;
+        cleanup();
+      }
+    }
+  };
 }
 
 async function createOrUpdateCaptureTab(captureTabId: number | null, url: string) {
@@ -188,20 +213,27 @@ async function createOrUpdateCaptureTab(captureTabId: number | null, url: string
   const tabId: number = targetTabId;
 
   try {
-    const loading = waitForTabComplete(tabId);
-    await chrome.tabs.update(tabId, { url, active: false });
-    await loading;
+    await navigateCaptureTab(tabId, url);
     return tabId;
   } catch (error) {
     if (Number.isInteger(captureTabId)) {
       const tab = await chrome.tabs.create({ url: "about:blank", active: false });
       if (!tab.id) throw error;
-      const loading = waitForTabComplete(tab.id);
-      await chrome.tabs.update(tab.id, { url, active: false });
-      await loading;
+      await navigateCaptureTab(tab.id, url);
       return tab.id;
     }
     throw error;
+  }
+}
+
+async function navigateCaptureTab(tabId: number, url: string) {
+  const loading = waitForTabComplete(tabId);
+
+  try {
+    await chrome.tabs.update(tabId, { url, active: false });
+    await loading.promise;
+  } finally {
+    loading.dispose();
   }
 }
 
@@ -321,28 +353,20 @@ async function downloadZip(job: ExportJob, items: ExportResultItem[]) {
   ];
 
   const zipBlob = await createZipBlob(files);
-  const dataUrl = await blobToDataUrl(zipBlob);
+  const objectUrl = URL.createObjectURL(zipBlob);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 
-  await chrome.downloads.download({
-    url: dataUrl,
-    filename: `nav2md-export-${timestamp}.zip`,
-    saveAs: true
-  });
-
-  return manifest;
-}
-
-async function blobToDataUrl(blob: Blob) {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = "";
-  const chunkSize = 0x8000;
-
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  try {
+    await chrome.downloads.download({
+      url: objectUrl,
+      filename: `nav2md-export-${timestamp}.zip`,
+      saveAs: true
+    });
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
   }
 
-  return `data:${blob.type};base64,${btoa(binary)}`;
+  return manifest;
 }
 
 async function runExportJob(job: ExportJob) {

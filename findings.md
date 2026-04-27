@@ -57,4 +57,19 @@
   - selected item count
   - selected item list
   - a `Start export` button
-- Export currently sends normalized task payloads to the background worker and logs receipt there.
+- Export now sends normalized task payloads to the background worker, which runs capture, extraction, Markdown generation, zip packaging, and download orchestration.
+
+### Dependency installation constraint
+
+- Attempted to install TypeScript/Vite/Turndown/JSZip for the planned migration.
+- npm could not resolve the configured registry host.
+- The elevated retry could not proceed because the approval service returned 503.
+- A temporary no-build MV3 implementation was used to keep progress moving.
+- After the user installed the dependencies manually, the project moved to TypeScript/Vite with Turndown and JSZip.
+
+### Export runtime implementation
+
+- Background export jobs now reuse one hidden capture tab where possible.
+- The extractor module is loaded inside the target page through a web-accessible dynamic import.
+- Markdown is generated with Turndown in the page context, where DOM APIs are available.
+- Zip output is generated with JSZip in the background runtime.

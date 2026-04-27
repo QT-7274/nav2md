@@ -48,3 +48,47 @@
   - `src/content/index.js`
   - `src/background/service-worker.js`
 - Next checkpoint: validate behavior in Chrome on a real docs page before building page-capture and markdown extraction.
+
+### Session 5
+
+- Attempted to install TypeScript/Vite/Turndown/JSZip dependencies.
+- Dependency installation failed because the configured npm registry could not resolve, and the elevated retry could not be approved due to an approval service 503.
+- Continued with a no-dependency MV3 implementation path for the MVP slice.
+- Added:
+  - background capture-tab orchestration
+  - page-context docs content extraction
+  - basic Markdown conversion
+  - deterministic filename generation
+  - no-compression zip generation
+  - manifest generation
+  - overlay export progress states
+  - real static validation scripts
+- Verified:
+  - `npm run build`
+  - zip signature generation
+  - zip listing with `unzip -l`
+- Next checkpoint: load the extension in Chrome and validate on real docs pages.
+
+### Session 6
+
+- User installed the planned npm dependencies:
+  - `turndown`
+  - `jszip`
+  - `typescript`
+  - `vite`
+  - `@types/chrome`
+  - `@types/turndown`
+- Migrated runtime entries from JavaScript to TypeScript.
+- Added Vite build output for:
+  - `src/background/service-worker.ts`
+  - `src/content/index.ts`
+  - `src/extractor/page-extractor.ts`
+- Swapped the extractor Markdown conversion to Turndown.
+- Swapped the custom zip writer to JSZip.
+- Updated `manifest.json` so the extractor module is web-accessible from target pages.
+- Updated validation scripts to check built `dist` output.
+- Verified:
+  - `npm run typecheck`
+  - `npm run build`
+  - `npm run lint`
+- Next checkpoint: load `dist` as the unpacked extension and validate on real docs pages.

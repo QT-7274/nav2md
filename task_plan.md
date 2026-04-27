@@ -7,9 +7,9 @@ Build the MVP of `nav2md`: a Chrome extension that lets the user select left-sid
 ## Current Status
 
 - Phase 1: Repository bootstrap and project skeleton — in_progress
-- Phase 2: Extension selection-mode foundation — in_progress
-- Phase 3: Export job orchestration and extraction pipeline — pending
-- Phase 4: Zip export, manifest, and progress UI — pending
+- Phase 2: Extension selection-mode foundation — partially complete
+- Phase 3: Export job orchestration and extraction pipeline — in_progress
+- Phase 4: Zip export, manifest, and progress UI — in_progress
 - Phase 5: Validation on representative docs sites — pending
 
 ## Key Decisions
@@ -45,7 +45,11 @@ Progress notes:
 - Chose a zero-build native Chrome extension skeleton for the first vertical slice to reduce startup friction.
 - Added `manifest.json`, a service worker entry, a content script entry, overlay styles, and a README load path.
 - Static validation passed for `manifest.json`.
+- Added real no-dependency validation scripts for manifest parsing and JavaScript syntax checks.
 - Remaining Phase 1 check: load the unpacked extension in Chrome and confirm the action toggles the page overlay.
+- Migrated the runtime to TypeScript and Vite after dependencies were installed manually.
+- `npm run build` now emits a loadable `dist` directory.
+- Remaining Phase 1 check: load `dist` in Chrome and confirm the action toggles the page overlay.
 
 ### Phase 2: Extension Selection-Mode Foundation
 
@@ -63,6 +67,7 @@ Progress notes:
 - Multi-select, deselect, selected-count display, and selected-item list are in place.
 - `Start export` now converts selections into normalized task payloads and sends them to the background worker.
 - Remaining Phase 2 check: validate real docs-site behavior in Chrome and tighten candidate filtering for left-nav-heavy layouts.
+- Candidate detection now filters toward nav/sidebar/left-column links and avoids obvious body-only links.
 
 ### Phase 3: Export Job Orchestration and Extraction Pipeline
 
@@ -73,6 +78,12 @@ Progress notes:
 - Extract docs main content container and clean UI noise
 - Convert cleaned content to Markdown
 
+Progress notes:
+
+- Added a reusable capture-tab flow in the background runtime.
+- Added a page-context docs extractor with ordered content-root heuristics.
+- Markdown generation now uses Turndown inside the page extraction step.
+
 ### Phase 4: Zip Export, Manifest, and Progress UI
 
 - Create deterministic filename generation
@@ -80,6 +91,13 @@ Progress notes:
 - Generate `manifest.json`
 - Package zip and trigger download
 - Surface progress and final counts in UI
+
+Progress notes:
+
+- Replaced the temporary no-dependency zip generator with JSZip.
+- Added deterministic markdown filename generation.
+- Added manifest generation with success/failure items and diagnostics.
+- Added overlay progress states for started, per-task, finished, and error phases.
 
 ### Phase 5: Validation on Representative Docs Sites
 

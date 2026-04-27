@@ -2,10 +2,22 @@
   "name": "nav2md",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Chrome extension for selecting docs navigation items and exporting Markdown.",
   "scripts": {
-    "lint": "echo \"No linter configured yet\"",
-    "build": "echo \"No build step yet - load this repository as an unpacked extension in Chrome\"",
-    "typecheck": "echo \"TypeScript not configured yet\""
+    "lint": "node scripts/validate-extension.mjs dist",
+    "build": "vite build && node scripts/validate-extension.mjs dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1",
+    "turndown": "^7.2.4"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.40",
+    "@types/node": "^25.6.0",
+    "@types/turndown": "^5.0.6",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10"
   }
 }

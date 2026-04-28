@@ -1,5 +1,5 @@
 import { createMarkdownFilenames } from "../export/filenames.js";
-import type { ZipFile } from "../export/zip.js";
+import { createZipBlob, type ZipFile } from "../export/zip.js";
 import type {
   ExportFailure,
   ExportManifest,
@@ -496,12 +496,12 @@ async function ensureOffscreenDocument() {
   await creatingOffscreenDocument;
 }
 
-async function createZipBlobUrl(files: ZipFile[]) {
+async function createZipBlobUrl(zipBlob: Blob) {
   await ensureOffscreenDocument();
 
   const response = (await chrome.runtime.sendMessage({
     type: CREATE_ZIP_BLOB_URL_MESSAGE_TYPE,
-    files
+    zipBlob
   })) as { ok?: boolean; url?: string; message?: string } | undefined;
 
   if (!response?.ok || !response.url) {
@@ -550,7 +550,8 @@ async function downloadZip(job: ExportJob, items: ExportResultItem[]) {
     }
   ];
 
-  const downloadUrl = await createZipBlobUrl(files);
+  const zipBlob = await createZipBlob(files);
+  const downloadUrl = await createZipBlobUrl(zipBlob);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 
   try {

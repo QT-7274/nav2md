@@ -50,6 +50,7 @@ const selectedItems = new Map<string, SelectedItem>();
 let exportRunning = false;
 let cachedNavContainer: Element | null = null;
 let repositionFrameId: number | null = null;
+let hoverFrameId: number | null = null;
 let shouldRefreshNavContainer = false;
 
 const PANEL_MARGIN_PX = 16;
@@ -339,10 +340,26 @@ function updateHoverBox(target: Element | null) {
 
   const rect = target.getBoundingClientRect();
   hoverNode.hidden = false;
-  hoverNode.style.top = `${rect.top + window.scrollY}px`;
-  hoverNode.style.left = `${rect.left + window.scrollX}px`;
+  hoverNode.style.top = `${rect.top}px`;
+  hoverNode.style.left = `${rect.left}px`;
   hoverNode.style.width = `${rect.width}px`;
   hoverNode.style.height = `${rect.height}px`;
+}
+
+function scheduleHoverBoxUpdate() {
+  if (!selectionEnabled || hoverFrameId !== null) return;
+
+  hoverFrameId = requestAnimationFrame(() => {
+    hoverFrameId = null;
+
+    if (!currentTarget?.isConnected) {
+      currentTarget = null;
+      updateHoverBox(null);
+      return;
+    }
+
+    updateHoverBox(currentTarget);
+  });
 }
 
 function getSelectionKey(target: HTMLAnchorElement) {
@@ -417,6 +434,8 @@ document.addEventListener("mousemove", handleMouseMove, true);
 document.addEventListener("click", handleClick, true);
 window.addEventListener("resize", () => scheduleRepositionPanel(true), { passive: true });
 window.addEventListener("scroll", () => scheduleRepositionPanel(), { passive: true });
+window.addEventListener("resize", scheduleHoverBoxUpdate, { passive: true });
+document.addEventListener("scroll", scheduleHoverBoxUpdate, { passive: true, capture: true });
 
 chrome.runtime.onMessage.addListener((rawMessage, _sender, sendResponse) => {
   const message = rawMessage as { type?: string; enabled?: boolean } | ExportProgressMessage;

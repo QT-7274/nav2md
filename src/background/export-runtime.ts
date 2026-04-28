@@ -1,5 +1,5 @@
 import { createMarkdownFilenames } from "../export/filenames.js";
-import { createZipBlob } from "../export/zip.js";
+import { createZipBlob, type ZipFile } from "../export/zip.js";
 import type {
   ExportFailure,
   ExportManifest,
@@ -15,6 +15,11 @@ const PROGRESS_MESSAGE_TYPE = "NAV2MD_EXPORT_PROGRESS";
 const CAPTURE_TIMEOUT_MS = 30000;
 const CAPTURE_STABILIZE_MS = 1200;
 const EXTRACTOR_SCRIPT_FILE = "src/extractor/page-extractor.js";
+const OFFSCREEN_DOCUMENT_PATH = "src/offscreen/blob-download.html";
+const CREATE_ZIP_BLOB_URL_MESSAGE_TYPE = "NAV2MD_CREATE_ZIP_BLOB_URL";
+const REVOKE_BLOB_URL_MESSAGE_TYPE = "NAV2MD_REVOKE_BLOB_URL";
+const INDEX_FILENAME = "index.md";
+const RESERVED_EXPORT_FILENAMES = [INDEX_FILENAME];
 
 interface ExportJob {
   id: string;
@@ -34,6 +39,7 @@ type ProgressPayload = Record<string, unknown> & {
 
 let activeJob: ExportJob | null = null;
 let nextJobSequence = 1;
+let creatingOffscreenDocument: Promise<void> | null = null;
 
 function createJobId() {
   const sequence = String(nextJobSequence).padStart(4, "0");
@@ -412,22 +418,132 @@ function buildManifest(job: ExportJob, items: ExportResultItem[]): ExportManifes
   };
 }
 
+function escapeMarkdownText(value: string) {
+  return value.replace(/[\\[\]]/g, "\\$&");
+}
+
+function createMarkdownLinkTarget(filename: string) {
+  return encodeURI(filename).replace(/[()]/g, (character) => `%${character.charCodeAt(0).toString(16)}`);
+}
+
+function buildIndexMarkdown(job: ExportJob, items: ExportResultItem[], manifest: ExportManifest) {
+  const lines = [
+    "# nav2md Export Index",
+    "",
+    `Source: ${job.sourceUrl}`,
+    `Created: ${manifest.createdAt}`,
+    `Documents: ${manifest.success} exported, ${manifest.failed} failed`,
+    "",
+    "## Documents",
+    ""
+  ];
+
+  const successfulItems = items.filter(
+    (item): item is ExportResultItem & { result: Extract<ExportResult, { ok: true }> } =>
+      item.result.ok
+  );
+
+  if (successfulItems.length === 0) {
+    lines.push("No documents were exported.", "");
+  } else {
+    successfulItems.forEach((item) => {
+      const title = item.task.sourceTextPath.at(-1) || item.task.title || item.result.title;
+      const filename = item.filename || `${item.task.id}.md`;
+      const sourcePath = item.task.sourceTextPath.join(" > ");
+      lines.push(
+        `- [${escapeMarkdownText(title)}](${createMarkdownLinkTarget(filename)})`,
+        `  - File: ${filename}`,
+        `  - Source: ${item.result.url || item.task.url}`
+      );
+      if (sourcePath && sourcePath !== title) {
+        lines.push(`  - Nav path: ${sourcePath}`);
+      }
+    });
+    lines.push("");
+  }
+
+  const failedItems = items.filter((item) => !item.result.ok);
+  if (failedItems.length > 0) {
+    lines.push("## Failures", "");
+    failedItems.forEach((item) => {
+      const title = item.task.sourceTextPath.at(-1) || item.task.title;
+      if (item.result.ok) return;
+      lines.push(
+        `- ${escapeMarkdownText(title)}`,
+        `  - Source: ${item.task.url}`,
+        `  - Error: ${item.result.reason} - ${item.result.message}`
+      );
+    });
+    lines.push("");
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+async function ensureOffscreenDocument() {
+  if (await chrome.offscreen.hasDocument()) return;
+
+  creatingOffscreenDocument ||= chrome.offscreen
+    .createDocument({
+      url: OFFSCREEN_DOCUMENT_PATH,
+      reasons: [chrome.offscreen.Reason.BLOBS],
+      justification: "Create Blob URLs for nav2md ZIP downloads."
+    })
+    .finally(() => {
+      creatingOffscreenDocument = null;
+    });
+
+  await creatingOffscreenDocument;
+}
+
+async function createZipBlobUrl(zipBlob: Blob) {
+  await ensureOffscreenDocument();
+
+  const response = (await chrome.runtime.sendMessage({
+    type: CREATE_ZIP_BLOB_URL_MESSAGE_TYPE,
+    zipBlob
+  })) as { ok?: boolean; url?: string; message?: string } | undefined;
+
+  if (!response?.ok || !response.url) {
+    throw new Error(response?.message || "Could not create ZIP Blob URL.");
+  }
+
+  return response.url;
+}
+
+async function revokeBlobUrl(url: string) {
+  const response = (await chrome.runtime.sendMessage({
+    type: REVOKE_BLOB_URL_MESSAGE_TYPE,
+    url
+  })) as { ok?: boolean; activeUrlCount?: number } | undefined;
+
+  if (response?.activeUrlCount === 0 && (await chrome.offscreen.hasDocument())) {
+    await chrome.offscreen.closeDocument();
+  }
+}
+
 async function downloadZip(job: ExportJob, items: ExportResultItem[]) {
   const successfulItems = items.filter(
     (item): item is ExportResultItem & { result: Extract<ExportResult, { ok: true }> } =>
       item.result.ok
   );
-  const filenames = createMarkdownFilenames(successfulItems.map((item) => item.task));
+  const filenames = createMarkdownFilenames(successfulItems.map((item) => item.task), {
+    reservedFilenames: RESERVED_EXPORT_FILENAMES
+  });
   successfulItems.forEach((item, index) => {
     item.filename = filenames[index] || `${item.task.id}.md`;
   });
 
   const manifest = buildManifest(job, items);
-  const files = [
+  const files: ZipFile[] = [
     ...successfulItems.map((item) => ({
       name: item.filename || `${item.task.id}.md`,
       content: `# ${item.result.title || item.task.title}\n\nSource: ${item.result.url || item.task.url}\n\n${item.result.markdown}\n`
     })),
+    {
+      name: INDEX_FILENAME,
+      content: buildIndexMarkdown(job, items, manifest)
+    },
     {
       name: "manifest.json",
       content: `${JSON.stringify(manifest, null, 2)}\n`
@@ -435,17 +551,23 @@ async function downloadZip(job: ExportJob, items: ExportResultItem[]) {
   ];
 
   const zipBlob = await createZipBlob(files);
-  const objectUrl = URL.createObjectURL(zipBlob);
+  const downloadUrl = await createZipBlobUrl(zipBlob);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 
   try {
     await chrome.downloads.download({
-      url: objectUrl,
+      url: downloadUrl,
       filename: `nav2md-export-${timestamp}.zip`,
       saveAs: true
     });
   } finally {
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+    setTimeout(() => {
+      revokeBlobUrl(downloadUrl).catch((error) => {
+        console.debug("nav2md could not revoke ZIP Blob URL", {
+          message: getErrorMessage(error)
+        });
+      });
+    }, 10000);
   }
 
   return manifest;

@@ -3,7 +3,9 @@
   "name": "nav2md",
   "version": "0.1.0",
   "description": "Select docs navigation items and export them to Markdown.",
-  "permissions": ["activeTab", "scripting", "tabs", "storage", "downloads"],
+  "minimum_chrome_version": "148",
+  "message_serialization": "structured_clone",
+  "permissions": ["activeTab", "scripting", "tabs", "storage", "downloads", "offscreen"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "src/background/service-worker.js",

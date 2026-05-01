@@ -28,7 +28,11 @@ async function createZipBlobUrl(artifactId: unknown) {
     activeUrls.add(url);
     return url;
   } finally {
-    await deleteZipArtifact(artifactId);
+    await deleteZipArtifact(artifactId).catch((error) => {
+      console.debug("nav2md could not delete ZIP artifact", {
+        message: getErrorMessage(error)
+      });
+    });
   }
 }
 

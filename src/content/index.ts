@@ -1,6 +1,7 @@
 const ROOT_ID = "nav2md-extension-root";
 const PANEL_ID = "nav2md-extension-panel";
 const HOVER_ID = "nav2md-extension-hover";
+const BOX_SELECT_ID = "nav2md-extension-box-select";
 const LIST_ID = "nav2md-extension-selection-list";
 const LOCALE_STORAGE_KEY = "nav2md.locale";
 
@@ -73,6 +74,29 @@ interface SelectedItem {
   element: HTMLAnchorElement;
 }
 
+interface Point {
+  x: number;
+  y: number;
+}
+
+interface BoxRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+type BoxSelectionPhase = "idle" | "pending" | "dragging";
+
+interface BoxSelectionState {
+  phase: BoxSelectionPhase;
+  start: Point;
+  current: Point;
+  pointerId: number | null;
+}
+
 interface ExportProgressMessage {
   type: "NAV2MD_EXPORT_PROGRESS";
   phase: string;
@@ -99,6 +123,7 @@ let currentTarget: HTMLAnchorElement | null = null;
 let rootNode: HTMLDivElement | null = null;
 let panelNode: HTMLDivElement | null = null;
 let hoverNode: HTMLDivElement | null = null;
+let boxSelectNode: HTMLDivElement | null = null;
 let countLabelNode: HTMLElement | null = null;
 let countNode: HTMLElement | null = null;
 let statusNode: HTMLElement | null = null;
@@ -112,6 +137,7 @@ let localeButtonNodes: HTMLButtonElement[] = [];
 let shortcutCopyNodes: HTMLElement[] = [];
 const selectedItems = new Map<string, SelectedItem>();
 let exportRunning = false;
+let suppressNextClick = false;
 let cachedNavContainer: Element | null = null;
 let repositionFrameId: number | null = null;
 let hoverFrameId: number | null = null;
@@ -122,6 +148,12 @@ let localePreferenceOverride: Locale | null = null;
 let panelStatus: PanelStatus = {
   running: false,
   key: "selectionModeActive"
+};
+let boxSelectionState: BoxSelectionState = {
+  phase: "idle",
+  start: { x: 0, y: 0 },
+  current: { x: 0, y: 0 },
+  pointerId: null
 };
 
 const COPY: Record<Locale, PanelCopy> = {
@@ -185,6 +217,7 @@ const COPY: Record<Locale, PanelCopy> = {
 
 const PANEL_MARGIN_PX = 16;
 const PANEL_GAP_PX = 12;
+const BOX_SELECT_THRESHOLD_PX = 6;
 const NAV_CONTAINER_SELECTOR =
   "aside, nav, [role='navigation'], [role='tree'], [class*='sidebar' i], [class*='sidenav' i], [class*='side-nav' i], [class*='docs-nav' i]";
 
@@ -300,6 +333,11 @@ function ensureRoot() {
   hoverNode.id = HOVER_ID;
   hoverNode.hidden = true;
   rootNode.appendChild(hoverNode);
+
+  boxSelectNode = document.createElement("div");
+  boxSelectNode.id = BOX_SELECT_ID;
+  boxSelectNode.hidden = true;
+  rootNode.appendChild(boxSelectNode);
 
   panelNode = document.createElement("div");
   panelNode.id = PANEL_ID;
@@ -655,6 +693,18 @@ function getSelectionKey(target: HTMLAnchorElement) {
   return target.href || target.textContent?.trim() || "";
 }
 
+function addSelectedItem(target: HTMLAnchorElement) {
+  const key = getSelectionKey(target);
+  if (!key || selectedItems.has(key)) return false;
+
+  selectedItems.set(key, {
+    text: target.textContent?.trim() || "(untitled)",
+    href: target.href || "",
+    element: target
+  });
+  return true;
+}
+
 function toggleSelectedItem(target: HTMLAnchorElement) {
   const key = getSelectionKey(target);
   if (!key) return;
@@ -662,27 +712,207 @@ function toggleSelectedItem(target: HTMLAnchorElement) {
   if (selectedItems.has(key)) {
     selectedItems.delete(key);
   } else {
-    selectedItems.set(key, {
-      text: target.textContent?.trim() || "(untitled)",
-      href: target.href || "",
-      element: target
-    });
+    addSelectedItem(target);
   }
 
   updateSelectionStyles();
   updatePanel();
 }
 
-function handleMouseMove(event: MouseEvent) {
+function getBoxSelectionRect(): BoxRect {
+  const left = Math.min(boxSelectionState.start.x, boxSelectionState.current.x);
+  const top = Math.min(boxSelectionState.start.y, boxSelectionState.current.y);
+  const right = Math.max(boxSelectionState.start.x, boxSelectionState.current.x);
+  const bottom = Math.max(boxSelectionState.start.y, boxSelectionState.current.y);
+
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    width: right - left,
+    height: bottom - top
+  };
+}
+
+function hasPassedBoxSelectionThreshold() {
+  const distanceX = boxSelectionState.current.x - boxSelectionState.start.x;
+  const distanceY = boxSelectionState.current.y - boxSelectionState.start.y;
+  return Math.hypot(distanceX, distanceY) >= BOX_SELECT_THRESHOLD_PX;
+}
+
+function rectsIntersect(a: BoxRect, b: DOMRect) {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+function updateBoxSelectionRect() {
+  if (!boxSelectNode) return;
+
+  const rect = getBoxSelectionRect();
+  boxSelectNode.hidden = false;
+  boxSelectNode.style.left = `${Math.round(rect.left)}px`;
+  boxSelectNode.style.top = `${Math.round(rect.top)}px`;
+  boxSelectNode.style.width = `${Math.round(rect.width)}px`;
+  boxSelectNode.style.height = `${Math.round(rect.height)}px`;
+}
+
+function releaseBoxSelectionPointerCapture() {
+  const pointerId = boxSelectionState.pointerId;
+  if (pointerId === null) return;
+
+  try {
+    if (document.documentElement.hasPointerCapture(pointerId)) {
+      document.documentElement.releasePointerCapture(pointerId);
+    }
+  } catch {
+    // The browser can release capture first during pointer cancellation.
+  }
+}
+
+function resetBoxSelection(restorePanel = true) {
+  releaseBoxSelectionPointerCapture();
+  boxSelectionState = {
+    phase: "idle",
+    start: { x: 0, y: 0 },
+    current: { x: 0, y: 0 },
+    pointerId: null
+  };
+  document.documentElement.removeAttribute("data-nav2md-box-selecting");
+  if (boxSelectNode) boxSelectNode.hidden = true;
+  if (restorePanel && panelNode) panelNode.hidden = !selectionEnabled;
+}
+
+function beginBoxSelection() {
+  boxSelectionState.phase = "dragging";
+  document.documentElement.setAttribute("data-nav2md-box-selecting", "true");
+  if (panelNode) panelNode.hidden = true;
+  currentTarget = null;
+  updateHoverBox(null);
+  window.getSelection()?.removeAllRanges();
+  updateBoxSelectionRect();
+}
+
+function cancelBoxSelection() {
+  resetBoxSelection(true);
+}
+
+function completeBoxSelection() {
+  const selectionRect = getBoxSelectionRect();
+
+  document.querySelectorAll<HTMLAnchorElement>("a[href]").forEach((link) => {
+    if (!isLikelyDocsNavLink(link)) return;
+    if (!rectsIntersect(selectionRect, link.getBoundingClientRect())) return;
+
+    addSelectedItem(link);
+  });
+
+  suppressNextClick = true;
+  window.setTimeout(() => {
+    suppressNextClick = false;
+  }, 0);
+
+  resetBoxSelection(true);
+  updateSelectionStyles();
+  updatePanel();
+}
+
+function captureBoxSelectionPointer(pointerId: number) {
+  try {
+    document.documentElement.setPointerCapture(pointerId);
+  } catch {
+    // Pointer capture is best-effort; cancel paths still restore the panel.
+  }
+}
+
+function handlePointerDown(event: PointerEvent) {
+  if (!selectionEnabled || event.button !== 0 || !event.shiftKey) return;
+  if (isWithinExtension(event.target)) return;
+
+  boxSelectionState = {
+    phase: "pending",
+    start: { x: event.clientX, y: event.clientY },
+    current: { x: event.clientX, y: event.clientY },
+    pointerId: event.pointerId
+  };
+  captureBoxSelectionPointer(event.pointerId);
+}
+
+function handlePointerMove(event: PointerEvent) {
   if (!selectionEnabled) return;
+  if (
+    boxSelectionState.pointerId !== null &&
+    event.pointerId !== boxSelectionState.pointerId
+  ) {
+    return;
+  }
+
+  if (boxSelectionState.phase !== "idle") {
+    boxSelectionState.current = { x: event.clientX, y: event.clientY };
+
+    if (boxSelectionState.phase === "pending" && hasPassedBoxSelectionThreshold()) {
+      beginBoxSelection();
+    }
+
+    if (boxSelectionState.phase === "dragging") {
+      event.preventDefault();
+      event.stopPropagation();
+      updateBoxSelectionRect();
+    }
+    return;
+  }
 
   const candidate = resolveCandidate(event.target);
   currentTarget = candidate;
   updateHoverBox(candidate);
 }
 
+function handlePointerUp(event: PointerEvent) {
+  if (!selectionEnabled || boxSelectionState.phase === "idle") return;
+  if (
+    boxSelectionState.pointerId !== null &&
+    event.pointerId !== boxSelectionState.pointerId
+  ) {
+    return;
+  }
+
+  boxSelectionState.current = { x: event.clientX, y: event.clientY };
+
+  if (boxSelectionState.phase === "dragging") {
+    event.preventDefault();
+    event.stopPropagation();
+    completeBoxSelection();
+    return;
+  }
+
+  resetBoxSelection(true);
+}
+
+function handlePointerCancel(event: PointerEvent) {
+  if (
+    boxSelectionState.pointerId !== null &&
+    event.pointerId !== boxSelectionState.pointerId
+  ) {
+    return;
+  }
+
+  cancelBoxSelection();
+}
+
+function handleDragStart(event: DragEvent) {
+  if (!selectionEnabled || boxSelectionState.phase === "idle") return;
+
+  event.preventDefault();
+  event.stopPropagation();
+}
+
 function handleClick(event: MouseEvent) {
   if (!selectionEnabled) return;
+  if (suppressNextClick) {
+    event.preventDefault();
+    event.stopPropagation();
+    suppressNextClick = false;
+    return;
+  }
   if (isWithinExtension(event.target)) return;
 
   const clickedTarget = resolveCandidate(event.target);
@@ -699,6 +929,10 @@ function handleKeyDown(event: KeyboardEvent) {
 
   event.preventDefault();
   event.stopPropagation();
+  if (boxSelectionState.phase !== "idle") {
+    cancelBoxSelection();
+    return;
+  }
   setSelectionMode(false);
 }
 
@@ -708,6 +942,7 @@ function setSelectionMode(enabled: boolean) {
 
   if (panelNode) panelNode.hidden = !enabled;
   if (!enabled) {
+    resetBoxSelection(false);
     cachedNavContainer = null;
     currentTarget = null;
     exportRunning = false;
@@ -731,9 +966,16 @@ function setSelectionMode(enabled: boolean) {
   }
 }
 
-document.addEventListener("mousemove", handleMouseMove, true);
+document.addEventListener("pointerdown", handlePointerDown, true);
+document.addEventListener("pointermove", handlePointerMove, true);
+document.addEventListener("pointerup", handlePointerUp, true);
+document.addEventListener("pointercancel", handlePointerCancel, true);
+document.addEventListener("dragstart", handleDragStart, true);
 document.addEventListener("click", handleClick, true);
 document.addEventListener("keydown", handleKeyDown, true);
+window.addEventListener("pointerup", handlePointerUp, true);
+window.addEventListener("pointercancel", handlePointerCancel, true);
+window.addEventListener("blur", cancelBoxSelection);
 window.addEventListener("resize", () => scheduleRepositionPanel(true), { passive: true });
 window.addEventListener("scroll", () => scheduleRepositionPanel(), { passive: true });
 window.addEventListener("resize", scheduleHoverBoxUpdate, { passive: true });

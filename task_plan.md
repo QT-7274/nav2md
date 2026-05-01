@@ -7,10 +7,11 @@ Build the MVP of `nav2md`: a Chrome extension that lets the user select left-sid
 ## Current Status
 
 - Phase 1: Repository bootstrap and project skeleton — in_progress
-- Phase 2: Extension selection-mode foundation — partially complete
+- Phase 2: Extension selection-mode foundation — in_progress
 - Phase 3: Export job orchestration and extraction pipeline — in_progress
 - Phase 4: Zip export, manifest, and progress UI — in_progress
 - Phase 5: Validation on representative docs sites — pending
+- Phase 6: Shift box selection shortcut — complete
 
 ## Key Decisions
 
@@ -107,12 +108,27 @@ Progress notes:
 - Test SPA docs site
 - Record failures, heuristics gaps, and follow-up tasks
 
+### Phase 6: Shift Box Selection Shortcut
+
+- Add `Shift + mouse drag` box selection in selection mode
+- Hide the nav2md panel only after the drag passes the threshold
+- Add intersecting docs nav links without clearing or toggling existing selections
+- Keep click selection and export flow unchanged
+- Verify with TypeScript and build checks
+
+Progress notes:
+
+- Added the box selection state machine to the content script.
+- Added the box selection overlay styles.
+- Verified with `npm run typecheck` and `npm run build`.
+
 ## Risks
 
 - Navigation candidate detection may be noisy on custom layouts.
 - Docs-container heuristics may need site-specific tuning.
 - Async rendering may require better readiness checks.
 - Sequential exports may feel slow for long task lists.
+- Box selection may need real-site tuning for unusual navigation layouts.
 
 ## Errors Encountered
 

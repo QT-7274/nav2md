@@ -305,6 +305,22 @@
   box-sizing: border-box;
 }
 
+#nav2md-extension-box-select {
+  position: absolute;
+  border: 1px solid #0f766e;
+  border-radius: 6px;
+  background: rgba(15, 118, 110, 0.14);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.62);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+:root[data-nav2md-box-selecting="true"],
+:root[data-nav2md-box-selecting="true"] * {
+  cursor: crosshair !important;
+  user-select: none !important;
+}
+
 [data-nav2md-selected="true"] {
   outline: 2px solid #0f766e !important;
   outline-offset: 2px !important;

@@ -34,6 +34,8 @@
 
 - Approved design spec path:
   - `docs/superpowers/specs/2026-04-20-docs-nav-md-export-design.md`
+- Shift box selection spec path:
+  - `docs/superpowers/specs/2026-05-02-shift-box-selection-design.md`
 
 ## Repository Context
 
@@ -58,6 +60,16 @@
   - selected item list
   - a `Start export` button
 - Export now sends normalized task payloads to the background worker, which runs capture, extraction, Markdown generation, zip packaging, and download orchestration.
+- The shortcut panel already advertises `Shift + Drag` for box selection, but the runtime needs the matching interaction.
+
+### Shift box selection decisions
+
+- `Shift + mouse drag` is the selected interaction.
+- Movement must pass a small threshold before box selection starts.
+- The panel hides only while active box selection is dragging.
+- Box selection only adds intersecting docs nav links.
+- Existing selected links stay selected.
+- The implementation keeps the change local to the content overlay and does not change export messaging.
 
 ### Dependency installation constraint
 

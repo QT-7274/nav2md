@@ -1,4 +1,9 @@
 import { createMarkdownFilenames } from "../export/filenames.js";
+import {
+  deleteZipArtifact,
+  purgeZipArtifacts,
+  writeZipArtifact
+} from "../export/zip-artifact-store.js";
 import { createZipBlob, type ZipFile } from "../export/zip.js";
 import type {
   ExportFailure,
@@ -20,6 +25,7 @@ const CREATE_ZIP_BLOB_URL_MESSAGE_TYPE = "NAV2MD_CREATE_ZIP_BLOB_URL";
 const REVOKE_BLOB_URL_MESSAGE_TYPE = "NAV2MD_REVOKE_BLOB_URL";
 const INDEX_FILENAME = "index.md";
 const RESERVED_EXPORT_FILENAMES = [INDEX_FILENAME];
+const ZIP_ARTIFACT_TTL_MS = 15 * 60 * 1000;
 
 interface ExportJob {
   id: string;
@@ -496,19 +502,35 @@ async function ensureOffscreenDocument() {
   await creatingOffscreenDocument;
 }
 
+function createZipArtifactId() {
+  return `zip_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
 async function createZipBlobUrl(zipBlob: Blob) {
+  const artifactId = createZipArtifactId();
   await ensureOffscreenDocument();
+  await purgeZipArtifacts(ZIP_ARTIFACT_TTL_MS).catch((error) => {
+    console.debug("nav2md could not purge stale ZIP artifacts", {
+      message: getErrorMessage(error)
+    });
+  });
 
-  const response = (await chrome.runtime.sendMessage({
-    type: CREATE_ZIP_BLOB_URL_MESSAGE_TYPE,
-    zipBlob
-  })) as { ok?: boolean; url?: string; message?: string } | undefined;
+  try {
+    await writeZipArtifact(artifactId, zipBlob);
+    const response = (await chrome.runtime.sendMessage({
+      type: CREATE_ZIP_BLOB_URL_MESSAGE_TYPE,
+      artifactId
+    })) as { ok?: boolean; url?: string; message?: string } | undefined;
 
-  if (!response?.ok || !response.url) {
-    throw new Error(response?.message || "Could not create ZIP Blob URL.");
+    if (!response?.ok || !response.url) {
+      throw new Error(response?.message || "Could not create ZIP Blob URL.");
+    }
+
+    return response.url;
+  } catch (error) {
+    await deleteZipArtifact(artifactId).catch(() => undefined);
+    throw error;
   }
-
-  return response.url;
 }
 
 async function revokeBlobUrl(url: string) {

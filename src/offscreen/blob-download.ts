@@ -1,3 +1,5 @@
+import { deleteZipArtifact, readZipArtifact } from "../export/zip-artifact-store.js";
+
 const CREATE_ZIP_BLOB_URL_MESSAGE_TYPE = "NAV2MD_CREATE_ZIP_BLOB_URL";
 const REVOKE_BLOB_URL_MESSAGE_TYPE = "NAV2MD_REVOKE_BLOB_URL";
 
@@ -7,35 +9,41 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function isZipArtifact(value: unknown): value is Blob | ArrayBuffer {
-  return value instanceof Blob || value instanceof ArrayBuffer;
+function isArtifactId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
 }
 
-function createZipBlobUrl(zipArtifact: unknown) {
-  if (!isZipArtifact(zipArtifact)) {
-    throw new Error("Invalid ZIP artifact payload.");
+async function createZipBlobUrl(artifactId: unknown) {
+  if (!isArtifactId(artifactId)) {
+    throw new Error("Invalid ZIP artifact id.");
   }
 
-  const zipBlob =
-    zipArtifact instanceof Blob
-      ? zipArtifact
-      : new Blob([zipArtifact], { type: "application/zip" });
-  const url = URL.createObjectURL(zipBlob);
-  activeUrls.add(url);
-  return url;
+  try {
+    const zipBlob = await readZipArtifact(artifactId);
+    if (!zipBlob) {
+      throw new Error("ZIP artifact was not found.");
+    }
+
+    const url = URL.createObjectURL(zipBlob);
+    activeUrls.add(url);
+    return url;
+  } finally {
+    await deleteZipArtifact(artifactId).catch((error) => {
+      console.debug("nav2md could not delete ZIP artifact", {
+        message: getErrorMessage(error)
+      });
+    });
+  }
 }
 
 chrome.runtime.onMessage.addListener((rawMessage, _sender, sendResponse) => {
-  const message = rawMessage as { type?: string; zipBlob?: unknown; url?: unknown };
+  const message = rawMessage as { type?: string; artifactId?: unknown; url?: unknown };
 
   if (message?.type === CREATE_ZIP_BLOB_URL_MESSAGE_TYPE) {
-    try {
-      const url = createZipBlobUrl(message.zipBlob);
-      sendResponse({ ok: true, url });
-    } catch (error) {
-      sendResponse({ ok: false, message: getErrorMessage(error) });
-    }
-    return;
+    createZipBlobUrl(message.artifactId)
+      .then((url) => sendResponse({ ok: true, url }))
+      .catch((error) => sendResponse({ ok: false, message: getErrorMessage(error) }));
+    return true;
   }
 
   if (message?.type === REVOKE_BLOB_URL_MESSAGE_TYPE) {

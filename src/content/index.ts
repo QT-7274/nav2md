@@ -2,17 +2,67 @@ const ROOT_ID = "nav2md-extension-root";
 const PANEL_ID = "nav2md-extension-panel";
 const HOVER_ID = "nav2md-extension-hover";
 const LIST_ID = "nav2md-extension-selection-list";
+const LOCALE_STORAGE_KEY = "nav2md.locale";
+
+type Locale = "zh-CN" | "en-US";
+type StatusKey =
+  | "selectionModeActive"
+  | "startingExport"
+  | "exportRunning"
+  | "capturing"
+  | "captured"
+  | "failed"
+  | "exportError"
+  | "exportFinished"
+  | "exportCouldNotStart";
+
+interface PanelStatus {
+  running: boolean;
+  key: StatusKey;
+  detail?: string;
+  progress?: PanelProgress;
+}
+
+type PanelProgress =
+  | {
+      kind: "plain";
+      text: string;
+    }
+  | {
+      kind: "summary";
+      success: number;
+      failed: number;
+    };
+
+type TextKey = {
+  [K in keyof PanelCopy]: PanelCopy[K] extends string ? K : never;
+}[keyof PanelCopy];
+
+interface PanelCopy {
+  language: string;
+  selectionModeActive: string;
+  selected: string;
+  noItemsSelectedYet: string;
+  startExport: string;
+  exporting: string;
+  exit: string;
+  startingExport: string;
+  exportRunning: string;
+  capturing: (detail?: string) => string;
+  captured: (detail?: string) => string;
+  failed: (detail?: string) => string;
+  exportError: string;
+  exportFinished: string;
+  exportCouldNotStart: string;
+  unknownError: string;
+  exportedSummary: (success: number, failed: number) => string;
+  localeSwitcherLabel: string;
+}
 
 interface SelectedItem {
   text: string;
   href: string;
   element: HTMLAnchorElement;
-}
-
-interface ExportStatus {
-  running: boolean;
-  status: string;
-  progress?: string;
 }
 
 interface ExportProgressMessage {
@@ -41,17 +91,71 @@ let currentTarget: HTMLAnchorElement | null = null;
 let rootNode: HTMLDivElement | null = null;
 let panelNode: HTMLDivElement | null = null;
 let hoverNode: HTMLDivElement | null = null;
+let countLabelNode: HTMLElement | null = null;
 let countNode: HTMLElement | null = null;
 let statusNode: HTMLElement | null = null;
 let progressNode: HTMLElement | null = null;
+let localeSwitchNode: HTMLElement | null = null;
 let selectedListNode: HTMLElement | null = null;
 let exportButtonNode: HTMLButtonElement | null = null;
+let exitButtonNode: HTMLButtonElement | null = null;
+let localeButtonNodes: HTMLButtonElement[] = [];
 const selectedItems = new Map<string, SelectedItem>();
 let exportRunning = false;
 let cachedNavContainer: Element | null = null;
 let repositionFrameId: number | null = null;
 let hoverFrameId: number | null = null;
 let shouldRefreshNavContainer = false;
+let currentLocale: Locale = "zh-CN";
+let localeLoadPromise: Promise<void> | null = null;
+let localePreferenceOverride: Locale | null = null;
+let panelStatus: PanelStatus = {
+  running: false,
+  key: "selectionModeActive"
+};
+
+const COPY: Record<Locale, PanelCopy> = {
+  "zh-CN": {
+    language: "中文",
+    selectionModeActive: "选择模式已开启",
+    selected: "已选",
+    noItemsSelectedYet: "还没有选择项目。",
+    startExport: "开始导出",
+    exporting: "导出中...",
+    exit: "退出",
+    startingExport: "开始导出...",
+    exportRunning: "导出运行中",
+    capturing: (detail) => (detail ? `正在抓取：${detail}` : "正在抓取"),
+    captured: (detail) => (detail ? `已抓取：${detail}` : "已抓取"),
+    failed: (detail) => (detail ? `失败：${detail}` : "失败"),
+    exportError: "导出错误",
+    exportFinished: "导出完成",
+    exportCouldNotStart: "无法开始导出。",
+    unknownError: "未知错误",
+    exportedSummary: (success, failed) => `${success} 个已导出，${failed} 个失败`,
+    localeSwitcherLabel: "语言"
+  },
+  "en-US": {
+    language: "EN",
+    selectionModeActive: "Selection mode active",
+    selected: "Selected",
+    noItemsSelectedYet: "No items selected yet.",
+    startExport: "Start export",
+    exporting: "Exporting...",
+    exit: "Exit",
+    startingExport: "Starting export...",
+    exportRunning: "Export running",
+    capturing: (detail) => (detail ? `Capturing: ${detail}` : "Capturing"),
+    captured: (detail) => (detail ? `Captured: ${detail}` : "Captured"),
+    failed: (detail) => (detail ? `Failed: ${detail}` : "Failed"),
+    exportError: "Export error",
+    exportFinished: "Export finished",
+    exportCouldNotStart: "Export could not start.",
+    unknownError: "Unknown error",
+    exportedSummary: (success, failed) => `${success} exported, ${failed} failed`,
+    localeSwitcherLabel: "Language"
+  }
+};
 
 const PANEL_MARGIN_PX = 16;
 const PANEL_GAP_PX = 12;
@@ -60,6 +164,99 @@ const NAV_CONTAINER_SELECTOR =
 
 function isWithinExtension(node: EventTarget | null) {
   return node instanceof Element && node.closest(`#${ROOT_ID}`);
+}
+
+function t(key: TextKey) {
+  return COPY[currentLocale][key];
+}
+
+function getLocaleButtonLabels() {
+  return {
+    "zh-CN": COPY["zh-CN"].language,
+    "en-US": COPY["en-US"].language
+  };
+}
+
+function resolveStatusText(status: PanelStatus) {
+  const copy = COPY[currentLocale];
+
+  switch (status.key) {
+    case "selectionModeActive":
+      return copy.selectionModeActive;
+    case "startingExport":
+      return copy.startingExport;
+    case "exportRunning":
+      return copy.exportRunning;
+    case "capturing":
+      return copy.capturing(status.detail);
+    case "captured":
+      return copy.captured(status.detail);
+    case "failed":
+      return copy.failed(status.detail);
+    case "exportError":
+      return copy.exportError;
+    case "exportFinished":
+      return copy.exportFinished;
+    case "exportCouldNotStart":
+      return copy.exportCouldNotStart;
+    default:
+      return copy.selectionModeActive;
+  }
+}
+
+function resolveProgressText(progress?: PanelProgress) {
+  if (!progress) return "";
+  if (progress.kind === "summary") {
+    return COPY[currentLocale].exportedSummary(progress.success, progress.failed);
+  }
+  return progress.text;
+}
+
+function setPanelStatus(status: PanelStatus) {
+  panelStatus = status;
+  exportRunning = status.running;
+  updatePanel();
+}
+
+function normalizeLocale(value: unknown): Locale | null {
+  return value === "zh-CN" || value === "en-US" ? value : null;
+}
+
+async function hydrateLocalePreference() {
+  if (localeLoadPromise) return localeLoadPromise;
+
+  localeLoadPromise = (async () => {
+    try {
+      const stored = await chrome.storage.local.get(LOCALE_STORAGE_KEY);
+      const locale = normalizeLocale(stored[LOCALE_STORAGE_KEY]);
+      if (!localePreferenceOverride && locale) {
+        currentLocale = locale;
+      }
+    } catch (error) {
+      console.debug("nav2md locale preference could not be loaded", error);
+    } finally {
+      updatePanel();
+    }
+  })();
+
+  return localeLoadPromise;
+}
+
+async function setLocale(locale: Locale) {
+  if (locale === currentLocale) {
+    updatePanel();
+    return;
+  }
+
+  currentLocale = locale;
+  localePreferenceOverride = locale;
+  updatePanel();
+
+  try {
+    await chrome.storage.local.set({ [LOCALE_STORAGE_KEY]: locale });
+  } catch (error) {
+    console.debug("nav2md locale preference could not be saved", error);
+  }
 }
 
 function ensureRoot() {
@@ -77,35 +274,52 @@ function ensureRoot() {
   panelNode = document.createElement("div");
   panelNode.id = PANEL_ID;
   panelNode.innerHTML = `
-    <div class="nav2md-panel__title">nav2md</div>
-    <div class="nav2md-panel__status">Selection mode active</div>
+    <div class="nav2md-panel__header">
+      <div class="nav2md-panel__title">nav2md</div>
+      <div class="nav2md-panel__locale-switch" role="group">
+        <button class="nav2md-panel__locale-button" type="button" data-locale="zh-CN"></button>
+        <button class="nav2md-panel__locale-button" type="button" data-locale="en-US"></button>
+      </div>
+    </div>
+    <div class="nav2md-panel__status"></div>
     <div class="nav2md-panel__meta">
-      <span class="nav2md-panel__count-label">Selected</span>
+      <span class="nav2md-panel__count-label"></span>
       <span class="nav2md-panel__count-value">0</span>
     </div>
     <div class="nav2md-panel__progress" hidden></div>
     <div id="${LIST_ID}" class="nav2md-panel__list"></div>
-    <button class="nav2md-panel__button nav2md-panel__button--secondary" type="button" data-action="export">
-      Start export
-    </button>
-    <button class="nav2md-panel__button" type="button" data-action="exit">Exit</button>
+    <button class="nav2md-panel__button nav2md-panel__button--secondary" type="button" data-action="export"></button>
+    <button class="nav2md-panel__button" type="button" data-action="exit"></button>
   `;
   rootNode.appendChild(panelNode);
 
+  countLabelNode = panelNode.querySelector(".nav2md-panel__count-label");
   countNode = panelNode.querySelector(".nav2md-panel__count-value");
   statusNode = panelNode.querySelector(".nav2md-panel__status");
   progressNode = panelNode.querySelector(".nav2md-panel__progress");
+  localeSwitchNode = panelNode.querySelector(".nav2md-panel__locale-switch");
   selectedListNode = panelNode.querySelector(`#${LIST_ID}`);
   exportButtonNode = panelNode.querySelector<HTMLButtonElement>("[data-action='export']");
+  exitButtonNode = panelNode.querySelector<HTMLButtonElement>("[data-action='exit']");
+  localeButtonNodes = Array.from(panelNode.querySelectorAll<HTMLButtonElement>("[data-locale]"));
 
-  panelNode
-    .querySelector("[data-action='exit']")
-    ?.addEventListener("click", () => setSelectionMode(false));
+  exitButtonNode?.addEventListener("click", () => setSelectionMode(false));
   exportButtonNode?.addEventListener("click", () => {
     sendExportTasks().catch((error) => {
       console.error("Failed to send export tasks", error);
     });
   });
+
+  localeButtonNodes.forEach((button) => {
+    button.addEventListener("click", () => {
+      const locale = normalizeLocale(button.dataset.locale);
+      if (locale) {
+        void setLocale(locale);
+      }
+    });
+  });
+
+  updatePanel();
 
   return rootNode;
 }
@@ -128,10 +342,13 @@ async function sendExportTasks() {
   if (selectedItems.size === 0 || exportRunning) return;
 
   const tasks = Array.from(selectedItems.values()).map(toExportTask);
-  setExportStatus({
+  setPanelStatus({
     running: true,
-    status: "Starting export...",
-    progress: `0 / ${tasks.length}`
+    key: "startingExport",
+    progress: {
+      kind: "plain",
+      text: `0 / ${tasks.length}`
+    }
   });
 
   const response = await chrome.runtime.sendMessage({
@@ -140,32 +357,44 @@ async function sendExportTasks() {
   });
 
   if (!response?.ok) {
-    setExportStatus({
+    setPanelStatus({
       running: false,
-      status: "Export could not start.",
-      progress: response?.reason || "Unknown error"
+      key: "exportCouldNotStart",
+      progress: {
+        kind: "plain",
+        text: response?.reason || t("unknownError")
+      }
     });
   }
-}
-
-function setExportStatus({ running, status, progress }: ExportStatus) {
-  exportRunning = running;
-  if (statusNode) statusNode.textContent = status;
-  if (progressNode) {
-    progressNode.hidden = !progress;
-    progressNode.textContent = progress || "";
-  }
-  updatePanel();
 }
 
 function updatePanel() {
   repositionPanel();
 
+  if (countLabelNode) countLabelNode.textContent = t("selected");
   if (countNode) countNode.textContent = String(selectedItems.size);
-  if (exportButtonNode) {
-    exportButtonNode.disabled = selectedItems.size === 0 || exportRunning;
-    exportButtonNode.textContent = exportRunning ? "Exporting..." : "Start export";
+  if (statusNode) statusNode.textContent = resolveStatusText(panelStatus);
+  if (localeSwitchNode) {
+    localeSwitchNode.setAttribute("aria-label", t("localeSwitcherLabel"));
   }
+  if (progressNode) {
+    progressNode.hidden = !panelStatus.progress;
+    progressNode.textContent = resolveProgressText(panelStatus.progress);
+  }
+  if (exportButtonNode) {
+    exportButtonNode.disabled = selectedItems.size === 0 || panelStatus.running;
+    exportButtonNode.textContent = panelStatus.running ? t("exporting") : t("startExport");
+  }
+  if (exitButtonNode) {
+    exitButtonNode.textContent = t("exit");
+  }
+  const localeLabels = getLocaleButtonLabels();
+  localeButtonNodes.forEach((button) => {
+    const locale = normalizeLocale(button.dataset.locale) || "zh-CN";
+    button.textContent = localeLabels[locale];
+    button.setAttribute("aria-pressed", String(locale === currentLocale));
+    button.classList.toggle("nav2md-panel__locale-button--active", locale === currentLocale);
+  });
   const listNode = selectedListNode;
   if (!listNode) return;
 
@@ -174,7 +403,7 @@ function updatePanel() {
   if (selectedItems.size === 0) {
     const emptyNode = document.createElement("div");
     emptyNode.className = "nav2md-panel__empty";
-    emptyNode.textContent = "No items selected yet.";
+    emptyNode.textContent = t("noItemsSelectedYet");
     listNode.appendChild(emptyNode);
     return;
   }
@@ -414,10 +643,13 @@ function setSelectionMode(enabled: boolean) {
     cachedNavContainer = null;
     currentTarget = null;
     exportRunning = false;
+    panelStatus = {
+      running: false,
+      key: "selectionModeActive"
+    };
     updateHoverBox(null);
     selectedItems.clear();
     updateSelectionStyles();
-    if (statusNode) statusNode.textContent = "Selection mode active";
     if (progressNode) {
       progressNode.hidden = true;
       progressNode.textContent = "";
@@ -426,6 +658,7 @@ function setSelectionMode(enabled: boolean) {
     chrome.runtime.sendMessage({ type: "NAV2MD_SELECTION_MODE_CLOSED" }).catch(() => {});
   } else {
     cachedNavContainer = null;
+    void hydrateLocalePreference();
     updatePanel();
   }
 }
@@ -456,56 +689,76 @@ function handleExportProgress(message: ExportProgressMessage) {
   ensureRoot();
 
   if (message.phase === "started") {
-    setExportStatus({
+    setPanelStatus({
       running: true,
-      status: "Export running",
-      progress: `0 / ${message.total}`
+      key: "exportRunning",
+      progress: {
+        kind: "plain",
+        text: `0 / ${message.total}`
+      }
     });
     return;
   }
 
   if (message.phase === "task-started") {
-    setExportStatus({
+    setPanelStatus({
       running: true,
-      status: `Capturing: ${message.task?.title || "Untitled"}`,
-      progress: `${message.completed || 0} / ${message.total}`
+      key: "capturing",
+      detail: message.task?.title || "Untitled",
+      progress: {
+        kind: "plain",
+        text: `${message.completed || 0} / ${message.total}`
+      }
     });
     return;
   }
 
   if (message.phase === "task-complete") {
-    const resultLabel = message.result?.ok ? "Captured" : "Failed";
-    setExportStatus({
+    setPanelStatus({
       running: true,
-      status: `${resultLabel}: ${message.task?.title || "Untitled"}`,
-      progress: `${message.completed || 0} / ${message.total}`
+      key: message.result?.ok ? "captured" : "failed",
+      detail: message.task?.title || "Untitled",
+      progress: {
+        kind: "plain",
+        text: `${message.completed || 0} / ${message.total}`
+      }
     });
     return;
   }
 
   if (message.phase === "error") {
-    setExportStatus({
+    setPanelStatus({
       running: false,
-      status: "Export error",
-      progress: message.message || message.reason || "Unknown error"
+      key: "exportError",
+      progress: {
+        kind: "plain",
+        text: message.message || message.reason || "Unknown error"
+      }
     });
     return;
   }
 
   if (message.phase === "finished") {
     if (message.error) {
-      setExportStatus({
+      setPanelStatus({
         running: false,
-        status: "Export error",
-        progress: message.error.message || message.error.reason || "Unknown error"
+        key: "exportError",
+        progress: {
+          kind: "plain",
+          text: message.error.message || message.error.reason || "Unknown error"
+        }
       });
       return;
     }
 
-    setExportStatus({
+    setPanelStatus({
       running: false,
-      status: "Export finished",
-      progress: `${message.success || 0} exported, ${message.failed || 0} failed`
+      key: "exportFinished",
+      progress: {
+        kind: "summary",
+        success: message.success || 0,
+        failed: message.failed || 0
+      }
     });
   }
 }

@@ -57,6 +57,14 @@ interface PanelCopy {
   unknownError: string;
   exportedSummary: (success: number, failed: number) => string;
   localeSwitcherLabel: string;
+  shortcutsTitle: string;
+  shortcutSelectLink: string;
+  shortcutBoxSelectLinks: string;
+  shortcutCloseNav2md: string;
+  shortcutClick: string;
+  shortcutShift: string;
+  shortcutDrag: string;
+  shortcutExit: string;
 }
 
 interface SelectedItem {
@@ -96,10 +104,12 @@ let countNode: HTMLElement | null = null;
 let statusNode: HTMLElement | null = null;
 let progressNode: HTMLElement | null = null;
 let localeSwitchNode: HTMLElement | null = null;
+let shortcutsNode: HTMLElement | null = null;
 let selectedListNode: HTMLElement | null = null;
 let exportButtonNode: HTMLButtonElement | null = null;
 let exitButtonNode: HTMLButtonElement | null = null;
 let localeButtonNodes: HTMLButtonElement[] = [];
+let shortcutCopyNodes: HTMLElement[] = [];
 const selectedItems = new Map<string, SelectedItem>();
 let exportRunning = false;
 let cachedNavContainer: Element | null = null;
@@ -133,7 +143,15 @@ const COPY: Record<Locale, PanelCopy> = {
     exportCouldNotStart: "无法开始导出。",
     unknownError: "未知错误",
     exportedSummary: (success, failed) => `${success} 个已导出，${failed} 个失败`,
-    localeSwitcherLabel: "语言"
+    localeSwitcherLabel: "语言",
+    shortcutsTitle: "快捷键",
+    shortcutSelectLink: "选择链接",
+    shortcutBoxSelectLinks: "框选链接",
+    shortcutCloseNav2md: "关闭 nav2md",
+    shortcutClick: "左键点击",
+    shortcutShift: "Shift",
+    shortcutDrag: "拖拽",
+    shortcutExit: "Esc"
   },
   "en-US": {
     language: "EN",
@@ -153,7 +171,15 @@ const COPY: Record<Locale, PanelCopy> = {
     exportCouldNotStart: "Export could not start.",
     unknownError: "Unknown error",
     exportedSummary: (success, failed) => `${success} exported, ${failed} failed`,
-    localeSwitcherLabel: "Language"
+    localeSwitcherLabel: "Language",
+    shortcutsTitle: "Shortcuts",
+    shortcutSelectLink: "Select link",
+    shortcutBoxSelectLinks: "Box select links",
+    shortcutCloseNav2md: "Close nav2md",
+    shortcutClick: "Left click",
+    shortcutShift: "Shift",
+    shortcutDrag: "Drag",
+    shortcutExit: "Esc"
   }
 };
 
@@ -168,6 +194,10 @@ function isWithinExtension(node: EventTarget | null) {
 
 function t(key: TextKey) {
   return COPY[currentLocale][key];
+}
+
+function isTextKey(value: string | undefined): value is TextKey {
+  return Boolean(value) && typeof COPY[currentLocale][value as keyof PanelCopy] === "string";
 }
 
 function getLocaleButtonLabels() {
@@ -290,6 +320,29 @@ function ensureRoot() {
     <div id="${LIST_ID}" class="nav2md-panel__list"></div>
     <button class="nav2md-panel__button nav2md-panel__button--secondary" type="button" data-action="export"></button>
     <button class="nav2md-panel__button" type="button" data-action="exit"></button>
+    <div class="nav2md-panel__shortcuts">
+      <div class="nav2md-panel__shortcuts-title" data-copy-key="shortcutsTitle"></div>
+      <div class="nav2md-panel__shortcut-row">
+        <span data-copy-key="shortcutSelectLink"></span>
+        <span class="nav2md-panel__shortcut-keys">
+          <kbd data-copy-key="shortcutClick"></kbd>
+        </span>
+      </div>
+      <div class="nav2md-panel__shortcut-row">
+        <span data-copy-key="shortcutBoxSelectLinks"></span>
+        <span class="nav2md-panel__shortcut-keys">
+          <kbd data-copy-key="shortcutShift"></kbd>
+          <span>+</span>
+          <kbd data-copy-key="shortcutDrag"></kbd>
+        </span>
+      </div>
+      <div class="nav2md-panel__shortcut-row">
+        <span data-copy-key="shortcutCloseNav2md"></span>
+        <span class="nav2md-panel__shortcut-keys">
+          <kbd data-copy-key="shortcutExit"></kbd>
+        </span>
+      </div>
+    </div>
   `;
   rootNode.appendChild(panelNode);
 
@@ -298,10 +351,12 @@ function ensureRoot() {
   statusNode = panelNode.querySelector(".nav2md-panel__status");
   progressNode = panelNode.querySelector(".nav2md-panel__progress");
   localeSwitchNode = panelNode.querySelector(".nav2md-panel__locale-switch");
+  shortcutsNode = panelNode.querySelector(".nav2md-panel__shortcuts");
   selectedListNode = panelNode.querySelector(`#${LIST_ID}`);
   exportButtonNode = panelNode.querySelector<HTMLButtonElement>("[data-action='export']");
   exitButtonNode = panelNode.querySelector<HTMLButtonElement>("[data-action='exit']");
   localeButtonNodes = Array.from(panelNode.querySelectorAll<HTMLButtonElement>("[data-locale]"));
+  shortcutCopyNodes = Array.from(panelNode.querySelectorAll<HTMLElement>("[data-copy-key]"));
 
   exitButtonNode?.addEventListener("click", () => setSelectionMode(false));
   exportButtonNode?.addEventListener("click", () => {
@@ -374,6 +429,7 @@ function updatePanel() {
   if (countLabelNode) countLabelNode.textContent = t("selected");
   if (countNode) countNode.textContent = String(selectedItems.size);
   if (statusNode) statusNode.textContent = resolveStatusText(panelStatus);
+  if (shortcutsNode) shortcutsNode.setAttribute("aria-label", t("shortcutsTitle"));
   if (localeSwitchNode) {
     localeSwitchNode.setAttribute("aria-label", t("localeSwitcherLabel"));
   }
@@ -394,6 +450,10 @@ function updatePanel() {
     button.textContent = localeLabels[locale];
     button.setAttribute("aria-pressed", String(locale === currentLocale));
     button.classList.toggle("nav2md-panel__locale-button--active", locale === currentLocale);
+  });
+  shortcutCopyNodes.forEach((node) => {
+    const copyKey = node.dataset.copyKey;
+    if (isTextKey(copyKey)) node.textContent = t(copyKey);
   });
   const listNode = selectedListNode;
   if (!listNode) return;
@@ -634,6 +694,14 @@ function handleClick(event: MouseEvent) {
   toggleSelectedItem(clickedTarget);
 }
 
+function handleKeyDown(event: KeyboardEvent) {
+  if (!selectionEnabled || event.key !== "Escape") return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  setSelectionMode(false);
+}
+
 function setSelectionMode(enabled: boolean) {
   selectionEnabled = enabled;
   ensureRoot();
@@ -665,6 +733,7 @@ function setSelectionMode(enabled: boolean) {
 
 document.addEventListener("mousemove", handleMouseMove, true);
 document.addEventListener("click", handleClick, true);
+document.addEventListener("keydown", handleKeyDown, true);
 window.addEventListener("resize", () => scheduleRepositionPanel(true), { passive: true });
 window.addEventListener("scroll", () => scheduleRepositionPanel(), { passive: true });
 window.addEventListener("resize", scheduleHoverBoxUpdate, { passive: true });

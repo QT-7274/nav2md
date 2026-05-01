@@ -762,5 +762,3 @@ function handleExportProgress(message: ExportProgressMessage) {
     });
   }
 }
-
-void hydrateLocalePreference();

@@ -1,5 +1,9 @@
 import { createMarkdownFilenames } from "../export/filenames.js";
-import { deleteZipArtifact, writeZipArtifact } from "../export/zip-artifact-store.js";
+import {
+  deleteZipArtifact,
+  purgeZipArtifacts,
+  writeZipArtifact
+} from "../export/zip-artifact-store.js";
 import { createZipBlob, type ZipFile } from "../export/zip.js";
 import type {
   ExportFailure,
@@ -21,6 +25,7 @@ const CREATE_ZIP_BLOB_URL_MESSAGE_TYPE = "NAV2MD_CREATE_ZIP_BLOB_URL";
 const REVOKE_BLOB_URL_MESSAGE_TYPE = "NAV2MD_REVOKE_BLOB_URL";
 const INDEX_FILENAME = "index.md";
 const RESERVED_EXPORT_FILENAMES = [INDEX_FILENAME];
+const ZIP_ARTIFACT_TTL_MS = 15 * 60 * 1000;
 
 interface ExportJob {
   id: string;
@@ -504,6 +509,11 @@ function createZipArtifactId() {
 async function createZipBlobUrl(zipBlob: Blob) {
   const artifactId = createZipArtifactId();
   await ensureOffscreenDocument();
+  await purgeZipArtifacts(ZIP_ARTIFACT_TTL_MS).catch((error) => {
+    console.debug("nav2md could not purge stale ZIP artifacts", {
+      message: getErrorMessage(error)
+    });
+  });
 
   try {
     await writeZipArtifact(artifactId, zipBlob);

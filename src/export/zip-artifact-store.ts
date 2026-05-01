@@ -52,6 +52,40 @@ export async function writeZipArtifact(id: string, blob: Blob) {
   }
 }
 
+export async function purgeZipArtifacts(maxAgeMs: number) {
+  const db = await openZipArtifactDb();
+  const expiresBefore = Date.now() - maxAgeMs;
+
+  try {
+    const transaction = db.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.openCursor();
+    const transactionDone = waitForTransaction(transaction);
+    const cursorDone = new Promise<void>((resolve, reject) => {
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          resolve();
+          return;
+        }
+
+        const record = cursor.value as Partial<ZipArtifactRecord>;
+        if (typeof record.createdAt !== "number" || record.createdAt <= expiresBefore) {
+          cursor.delete();
+        }
+
+        cursor.continue();
+      };
+      request.onerror = () =>
+        reject(request.error || new Error("Could not purge ZIP artifacts."));
+    });
+
+    await Promise.all([cursorDone, transactionDone]);
+  } finally {
+    db.close();
+  }
+}
+
 export async function readZipArtifact(id: string) {
   const db = await openZipArtifactDb();
 

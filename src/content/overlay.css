@@ -10,6 +10,7 @@
   top: 16px;
   left: calc(100vw - 266px);
   width: 250px;
+  max-height: calc(100vh - 32px);
   box-sizing: border-box;
   padding: 14px;
   border: 1px solid rgba(15, 23, 42, 0.14);
@@ -19,7 +20,38 @@
   color: #0f172a;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   backdrop-filter: blur(10px);
+  overflow: auto;
+  overscroll-behavior: contain;
   pointer-events: auto;
+}
+
+#nav2md-extension-panel,
+.nav2md-panel__list {
+  scrollbar-color: rgba(15, 118, 110, 0.36) transparent;
+  scrollbar-width: thin;
+}
+
+#nav2md-extension-panel::-webkit-scrollbar,
+.nav2md-panel__list::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+#nav2md-extension-panel::-webkit-scrollbar-track,
+.nav2md-panel__list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#nav2md-extension-panel::-webkit-scrollbar-thumb,
+.nav2md-panel__list::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(255, 255, 255, 0.72);
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.28);
+}
+
+#nav2md-extension-panel::-webkit-scrollbar-thumb:hover,
+.nav2md-panel__list::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 118, 110, 0.42);
 }
 
 .nav2md-panel__header {
@@ -78,39 +110,49 @@
 }
 
 .nav2md-panel__meta {
-  margin-top: 12px;
+  margin-top: 14px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+  padding-top: 12px;
   font-size: 12px;
 }
 
 .nav2md-panel__progress {
   margin-top: 10px;
+  border: 1px solid rgba(15, 118, 110, 0.16);
   border-radius: 10px;
-  background: #ecfdf5;
-  padding: 8px 10px;
-  color: #047857;
+  background: #dffbf0;
+  padding: 9px 10px;
+  color: #0f766e;
   font-size: 12px;
+  font-weight: 700;
   line-height: 1.4;
 }
 
 .nav2md-panel__count-label {
-  color: #475569;
+  color: #334155;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .nav2md-panel__count-value {
-  min-width: 20px;
+  min-width: 18px;
+  box-sizing: border-box;
   border-radius: 999px;
-  padding: 2px 8px;
+  padding: 3px 7px;
   background: #ccfbf1;
   color: #115e59;
   text-align: center;
+  font-size: 11px;
   font-weight: 700;
+  line-height: 1;
 }
 
 .nav2md-panel__list {
-  max-height: 180px;
+  max-height: min(180px, 28vh);
   margin-top: 12px;
   overflow: auto;
   display: flex;
@@ -171,6 +213,87 @@
 
 .nav2md-panel__button--secondary:disabled {
   opacity: 0.55;
+}
+
+.nav2md-panel__shortcuts {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(15, 118, 110, 0.16);
+  border-radius: 13px;
+  background: rgba(240, 253, 250, 0.48);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+.nav2md-panel__shortcuts-title {
+  align-self: flex-start;
+  border-radius: 999px;
+  background: rgba(204, 251, 241, 0.72);
+  padding: 4px 8px;
+  color: #0f766e;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.nav2md-panel__shortcut-row {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  box-sizing: border-box;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 7px 8px 7px 10px;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.nav2md-panel__shortcut-row > span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav2md-panel__shortcut-keys {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.nav2md-panel__shortcut-keys > span {
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.nav2md-panel__shortcut-keys kbd {
+  min-width: 26px;
+  box-sizing: border-box;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 7px;
+  background: rgba(248, 250, 252, 0.98);
+  box-shadow:
+    inset 0 -1px 0 rgba(15, 23, 42, 0.08),
+    0 1px 1px rgba(15, 23, 42, 0.04);
+  padding: 4px 7px;
+  color: #334155;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
 }
 
 #nav2md-extension-hover {

@@ -1,4 +1,5 @@
 import { createMarkdownFilenames } from "../export/filenames.js";
+import { deleteZipArtifact, writeZipArtifact } from "../export/zip-artifact-store.js";
 import { createZipBlob, type ZipFile } from "../export/zip.js";
 import type {
   ExportFailure,
@@ -496,19 +497,30 @@ async function ensureOffscreenDocument() {
   await creatingOffscreenDocument;
 }
 
+function createZipArtifactId() {
+  return `zip_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
 async function createZipBlobUrl(zipBlob: Blob) {
+  const artifactId = createZipArtifactId();
   await ensureOffscreenDocument();
 
-  const response = (await chrome.runtime.sendMessage({
-    type: CREATE_ZIP_BLOB_URL_MESSAGE_TYPE,
-    zipBlob
-  })) as { ok?: boolean; url?: string; message?: string } | undefined;
+  try {
+    await writeZipArtifact(artifactId, zipBlob);
+    const response = (await chrome.runtime.sendMessage({
+      type: CREATE_ZIP_BLOB_URL_MESSAGE_TYPE,
+      artifactId
+    })) as { ok?: boolean; url?: string; message?: string } | undefined;
 
-  if (!response?.ok || !response.url) {
-    throw new Error(response?.message || "Could not create ZIP Blob URL.");
+    if (!response?.ok || !response.url) {
+      throw new Error(response?.message || "Could not create ZIP Blob URL.");
+    }
+
+    return response.url;
+  } catch (error) {
+    await deleteZipArtifact(artifactId).catch(() => undefined);
+    throw error;
   }
-
-  return response.url;
 }
 
 async function revokeBlobUrl(url: string) {

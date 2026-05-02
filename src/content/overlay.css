@@ -320,7 +320,7 @@
 }
 
 .nav2md-panel__shortcut-row[data-tooltip]:hover::after,
-.nav2md-panel__shortcut-row[data-tooltip]:focus-within::after {
+.nav2md-panel__shortcut-row[data-tooltip]:focus-visible::after {
   position: absolute;
   left: 10px;
   bottom: calc(100% + 6px);
@@ -340,6 +340,11 @@
   overflow-wrap: anywhere;
   pointer-events: none;
   white-space: normal;
+}
+
+.nav2md-panel__shortcut-row:focus-visible {
+  outline: 2px solid #0f766e;
+  outline-offset: 2px;
 }
 
 .nav2md-panel__shortcut-row > span:first-child {

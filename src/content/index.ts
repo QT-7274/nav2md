@@ -399,13 +399,13 @@ function ensureRoot() {
         <span class="nav2md-panel__shortcuts-caret" aria-hidden="true">+</span>
       </button>
       <div class="nav2md-panel__shortcut-list" hidden>
-        <div class="nav2md-panel__shortcut-row">
+        <div class="nav2md-panel__shortcut-row" tabindex="0">
           <span class="nav2md-panel__shortcut-label" data-copy-key="shortcutSelectLink"></span>
           <span class="nav2md-panel__shortcut-keys">
             <kbd data-copy-key="shortcutClick"></kbd>
           </span>
         </div>
-        <div class="nav2md-panel__shortcut-row">
+        <div class="nav2md-panel__shortcut-row" tabindex="0">
           <span class="nav2md-panel__shortcut-label" data-copy-key="shortcutBoxSelectLinks"></span>
           <span class="nav2md-panel__shortcut-keys">
             <kbd data-copy-key="shortcutShift"></kbd>
@@ -413,7 +413,7 @@ function ensureRoot() {
             <kbd data-copy-key="shortcutDrag"></kbd>
           </span>
         </div>
-        <div class="nav2md-panel__shortcut-row">
+        <div class="nav2md-panel__shortcut-row" tabindex="0">
           <span class="nav2md-panel__shortcut-label" data-copy-key="shortcutCloseNav2md"></span>
           <span class="nav2md-panel__shortcut-keys">
             <kbd data-copy-key="shortcutExit"></kbd>
@@ -553,7 +553,6 @@ function updatePanel() {
       node.textContent = text;
       if (node.classList.contains("nav2md-panel__shortcut-label")) {
         node.closest(".nav2md-panel__shortcut-row")?.setAttribute("data-tooltip", text);
-        node.title = text;
         node.setAttribute("aria-label", text);
       }
     }

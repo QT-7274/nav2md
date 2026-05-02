@@ -218,6 +218,10 @@ const COPY: Record<Locale, PanelCopy> = {
 const PANEL_MARGIN_PX = 16;
 const PANEL_GAP_PX = 12;
 const BOX_SELECT_THRESHOLD_PX = 6;
+const LINK_CLUSTER_MAX_PARENT_DEPTH = 4;
+const LINK_CLUSTER_MIN_LINKS = 4;
+const LINK_CLUSTER_MIN_STRONG_CONTAINER_LINKS = 2;
+const LINK_CLUSTER_MIN_LEFT_LINKS = 3;
 const NAV_CONTAINER_SELECTOR =
   "aside, nav, [role='navigation'], [role='tree'], [class*='sidebar' i], [class*='sidenav' i], [class*='side-nav' i], [class*='docs-nav' i]";
 
@@ -641,10 +645,113 @@ function isLikelyDocsNavLink(link: HTMLAnchorElement, rect = link.getBoundingCli
   );
   if (navContainer) return true;
 
+  if (isLikelyDocsLinkClusterMember(link, rect)) return true;
+
   const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
   const isLeftColumn = rect.left < viewportWidth * 0.38 && rect.width < viewportWidth * 0.45;
   const looksLikeBodyLink = Boolean(link.closest("main, article, [role='main']"));
   return isLeftColumn && !looksLikeBodyLink;
+}
+
+function isLikelyDocsLinkClusterMember(link: HTMLAnchorElement, rect: DOMRect) {
+  const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+  if (!isLeftClusterLinkRect(rect, viewportWidth)) return false;
+
+  const targetUrl = parseLinkUrl(link);
+  if (!targetUrl || targetUrl.origin !== location.origin) return false;
+
+  for (
+    let depth = 0, container = link.parentElement;
+    container && depth < LINK_CLUSTER_MAX_PARENT_DEPTH;
+    depth += 1, container = container.parentElement
+  ) {
+    if (isWithinExtension(container)) return false;
+    if (container === document.body || container === document.documentElement) break;
+    if (container.matches("header, footer, [role='banner'], [role='contentinfo']")) return false;
+    if (container.matches("main, article, [role='main']")) continue;
+
+    const links = Array.from(container.querySelectorAll<HTMLAnchorElement>("a[href]"));
+    const validLinks = links.filter((candidate) => {
+      const candidateUrl = parseLinkUrl(candidate);
+      return candidateUrl?.origin === targetUrl.origin && isVisibleLink(candidate);
+    });
+
+    const minLinks = isStrongDocsLinkClusterContainer(container)
+      ? LINK_CLUSTER_MIN_STRONG_CONTAINER_LINKS
+      : LINK_CLUSTER_MIN_LINKS;
+    if (validLinks.length < minLinks) continue;
+
+    const leftLinks = validLinks.filter((candidate) =>
+      isLeftClusterLinkRect(candidate.getBoundingClientRect(), viewportWidth)
+    );
+    const minLeftLinks = Math.min(minLinks, LINK_CLUSTER_MIN_LEFT_LINKS);
+    if (leftLinks.length < minLeftLinks) continue;
+
+    if (hasSharedDocsPathPrefix(targetUrl, validLinks, minLeftLinks)) return true;
+  }
+
+  return false;
+}
+
+function parseLinkUrl(link: HTMLAnchorElement) {
+  const href = link.getAttribute("href");
+  if (!href || href.startsWith("#") || href.startsWith("javascript:")) return null;
+
+  try {
+    return new URL(href, location.href);
+  } catch {
+    return null;
+  }
+}
+
+function isVisibleLink(link: HTMLAnchorElement) {
+  const rect = link.getBoundingClientRect();
+  return rect.width >= 12 && rect.height >= 8;
+}
+
+function isLeftClusterLinkRect(rect: DOMRect, viewportWidth: number) {
+  return rect.left < viewportWidth * 0.45 && rect.width < viewportWidth * 0.55;
+}
+
+function isStrongDocsLinkClusterContainer(element: Element) {
+  const dataSlot = element.getAttribute("data-slot")?.toLowerCase() || "";
+  const className = typeof element.className === "string" ? element.className.toLowerCase() : "";
+  const isVerticalRegion =
+    element.getAttribute("role") === "region" &&
+    element.getAttribute("data-orientation") === "vertical" &&
+    element.hasAttribute("aria-labelledby");
+
+  return (
+    dataSlot.includes("accordion-content") ||
+    dataSlot.includes("collapsible-content") ||
+    className.includes("accordion") ||
+    className.includes("collapsible") ||
+    isVerticalRegion
+  );
+}
+
+function hasSharedDocsPathPrefix(targetUrl: URL, links: HTMLAnchorElement[], minMatches: number) {
+  const targetSegments = getPathSegments(targetUrl);
+  if (targetSegments.length === 0) return false;
+
+  const prefixLength = Math.min(targetSegments.length, 2);
+  const matchingLinks = links.filter((link) => {
+    const candidateUrl = parseLinkUrl(link);
+    if (!candidateUrl || candidateUrl.origin !== targetUrl.origin) return false;
+
+    const candidateSegments = getPathSegments(candidateUrl);
+    if (candidateSegments.length < prefixLength) return false;
+
+    return targetSegments
+      .slice(0, prefixLength)
+      .every((segment, index) => candidateSegments[index] === segment);
+  });
+
+  return matchingLinks.length >= minMatches;
+}
+
+function getPathSegments(url: URL) {
+  return url.pathname.split("/").filter(Boolean);
 }
 
 function updateSelectionStyles() {

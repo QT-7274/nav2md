@@ -83,6 +83,7 @@ export interface ExportManifest {
 export interface StartExportJobInput {
   tasks: unknown;
   sourceTabId: number | null;
+  sourceTitle?: string;
   sourceUrl: string;
 }
 

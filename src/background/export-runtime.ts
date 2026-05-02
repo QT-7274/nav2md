@@ -30,6 +30,7 @@ const ZIP_ARTIFACT_TTL_MS = 15 * 60 * 1000;
 interface ExportJob {
   id: string;
   sourceTabId: number | null;
+  sourceTitle: string;
   sourceUrl: string;
   tasks: ExportTask[];
 }
@@ -59,6 +60,38 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function normalizeText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function toSafeZipBasename(value: string) {
+  return String(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/https?:\/\//g, "")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "-")
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+function getSourceUrlLabel(sourceUrl: string) {
+  try {
+    const url = new URL(sourceUrl);
+    const path = url.pathname.split("/").filter(Boolean).join("-");
+    return [url.hostname, path].filter(Boolean).join("-");
+  } catch (_error) {
+    return sourceUrl;
+  }
+}
+
+function createZipDownloadFilename(job: ExportJob) {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const sourceLabel =
+    toSafeZipBasename(normalizeText(job.sourceTitle)) ||
+    toSafeZipBasename(getSourceUrlLabel(job.sourceUrl));
+  const prefix = sourceLabel ? `${sourceLabel}-nav2md-export` : "nav2md-export";
+
+  return `${prefix}-${timestamp}.zip`;
 }
 
 function normalizeSourceTextPath(value: unknown, fallbackTitle: string) {
@@ -574,12 +607,11 @@ async function downloadZip(job: ExportJob, items: ExportResultItem[]) {
 
   const zipBlob = await createZipBlob(files);
   const downloadUrl = await createZipBlobUrl(zipBlob);
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 
   try {
     await chrome.downloads.download({
       url: downloadUrl,
-      filename: `nav2md-export-${timestamp}.zip`,
+      filename: createZipDownloadFilename(job),
       saveAs: true
     });
   } finally {
@@ -722,6 +754,7 @@ function getErrorMessage(error: unknown) {
 export function startExportJob({
   tasks,
   sourceTabId,
+  sourceTitle = "",
   sourceUrl
 }: StartExportJobInput): StartExportJobResponse {
   if (activeJob) {
@@ -747,6 +780,7 @@ export function startExportJob({
   const job = {
     id: createJobId(),
     sourceTabId,
+    sourceTitle: normalizeText(sourceTitle),
     sourceUrl,
     tasks: normalized.tasks
   };

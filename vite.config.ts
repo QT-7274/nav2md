@@ -8,6 +8,10 @@ function copyExtensionAssets() {
     closeBundle() {
       const files = [
         ["manifest.json", "dist/manifest.json"],
+        ["icons/icon-16.png", "dist/icons/icon-16.png"],
+        ["icons/icon-32.png", "dist/icons/icon-32.png"],
+        ["icons/icon-48.png", "dist/icons/icon-48.png"],
+        ["icons/icon-128.png", "dist/icons/icon-128.png"],
         ["src/content/overlay.css", "dist/src/content/overlay.css"],
         ["src/offscreen/blob-download.html", "dist/src/offscreen/blob-download.html"]
       ] as const;

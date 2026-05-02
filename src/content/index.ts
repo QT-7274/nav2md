@@ -448,6 +448,8 @@ function ensureRoot() {
       console.error("Failed to send export tasks", error);
     });
   });
+  resetSelectionButtonNode?.addEventListener("click", resetSelection);
+  selectAllButtonNode?.addEventListener("click", selectAllNavLinks);
   shortcutsToggleNode?.addEventListener("click", () => {
     shortcutsExpanded = !shortcutsExpanded;
     updatePanel();
@@ -537,8 +539,12 @@ function updatePanel() {
   if (exitButtonNode) {
     exitButtonNode.textContent = t("exit");
   }
-  if (resetSelectionButtonNode) resetSelectionButtonNode.disabled = true;
-  if (selectAllButtonNode) selectAllButtonNode.disabled = true;
+  if (resetSelectionButtonNode) {
+    resetSelectionButtonNode.disabled = selectedItems.size === 0 || panelStatus.running;
+  }
+  if (selectAllButtonNode) {
+    selectAllButtonNode.disabled = panelStatus.running || getSelectableNavLinks().length === 0;
+  }
   const localeLabels = getLocaleButtonLabels();
   localeButtonNodes.forEach((button) => {
     const locale = normalizeLocale(button.dataset.locale) || "zh-CN";
@@ -975,6 +981,44 @@ function toggleSelectedItem(target: HTMLAnchorElement) {
   }
 
   updateSelectionStyles();
+  updatePanel();
+}
+
+function resetSelection() {
+  if (selectedItems.size === 0 || panelStatus.running) return;
+
+  selectedItems.clear();
+  updateSelectionStyles();
+  updatePanel();
+}
+
+function getSelectableNavLinks(refreshNavContainer = false) {
+  const scanRoot: ParentNode = findBestNavContainer(refreshNavContainer) || document;
+  const seenKeys = new Set<string>();
+
+  return Array.from(scanRoot.querySelectorAll<HTMLAnchorElement>("a[href]")).filter((link) => {
+    const rect = link.getBoundingClientRect();
+    if (!isLikelyDocsNavLink(link, rect)) return false;
+
+    const key = getSelectionKey(link);
+    if (!key || seenKeys.has(key)) return false;
+
+    seenKeys.add(key);
+    return true;
+  });
+}
+
+function selectAllNavLinks() {
+  if (panelStatus.running) return;
+
+  let changed = false;
+  getSelectableNavLinks(true).forEach((link) => {
+    changed = addSelectedItem(link) || changed;
+  });
+
+  if (changed) {
+    updateSelectionStyles();
+  }
   updatePanel();
 }
 

@@ -59,6 +59,8 @@ interface PanelCopy {
   exportedSummary: (success: number, failed: number) => string;
   localeSwitcherLabel: string;
   shortcutsTitle: string;
+  resetSelection: string;
+  selectAllNavTabs: string;
   shortcutSelectLink: string;
   shortcutBoxSelectLinks: string;
   shortcutCloseNav2md: string;
@@ -141,7 +143,11 @@ let statusNode: HTMLElement | null = null;
 let progressNode: HTMLElement | null = null;
 let localeSwitchNode: HTMLElement | null = null;
 let shortcutsNode: HTMLElement | null = null;
+let shortcutsToggleNode: HTMLButtonElement | null = null;
+let shortcutsListNode: HTMLElement | null = null;
 let selectedListNode: HTMLElement | null = null;
+let resetSelectionButtonNode: HTMLButtonElement | null = null;
+let selectAllButtonNode: HTMLButtonElement | null = null;
 let exportButtonNode: HTMLButtonElement | null = null;
 let exitButtonNode: HTMLButtonElement | null = null;
 let localeButtonNodes: HTMLButtonElement[] = [];
@@ -156,6 +162,7 @@ let shouldRefreshNavContainer = false;
 let currentLocale: Locale = "zh-CN";
 let localeLoadPromise: Promise<void> | null = null;
 let localePreferenceOverride: Locale | null = null;
+let shortcutsExpanded = false;
 const linkClusterCache = new WeakMap<Element, LinkClusterCacheEntry>();
 let panelStatus: PanelStatus = {
   running: false,
@@ -189,6 +196,8 @@ const COPY: Record<Locale, PanelCopy> = {
     exportedSummary: (success, failed) => `${success} 个已导出，${failed} 个失败`,
     localeSwitcherLabel: "语言",
     shortcutsTitle: "快捷键",
+    resetSelection: "重置",
+    selectAllNavTabs: "全选",
     shortcutSelectLink: "选择链接",
     shortcutBoxSelectLinks: "框选链接",
     shortcutCloseNav2md: "关闭 nav2md",
@@ -217,6 +226,8 @@ const COPY: Record<Locale, PanelCopy> = {
     exportedSummary: (success, failed) => `${success} exported, ${failed} failed`,
     localeSwitcherLabel: "Language",
     shortcutsTitle: "Shortcuts",
+    resetSelection: "Reset",
+    selectAllNavTabs: "All",
     shortcutSelectLink: "Select link",
     shortcutBoxSelectLinks: "Box select links",
     shortcutCloseNav2md: "Close nav2md",
@@ -369,34 +380,45 @@ function ensureRoot() {
     </div>
     <div class="nav2md-panel__status"></div>
     <div class="nav2md-panel__meta">
-      <span class="nav2md-panel__count-label"></span>
-      <span class="nav2md-panel__count-value">0</span>
+      <div class="nav2md-panel__count">
+        <span class="nav2md-panel__count-label"></span>
+        <span class="nav2md-panel__count-value">0</span>
+      </div>
+      <div class="nav2md-panel__selection-actions">
+        <button class="nav2md-panel__meta-button" type="button" data-action="reset-selection" disabled data-copy-key="resetSelection"></button>
+        <button class="nav2md-panel__meta-button" type="button" data-action="select-all-nav" disabled data-copy-key="selectAllNavTabs"></button>
+      </div>
     </div>
     <div class="nav2md-panel__progress" hidden></div>
     <div id="${LIST_ID}" class="nav2md-panel__list"></div>
     <button class="nav2md-panel__button nav2md-panel__button--secondary" type="button" data-action="export"></button>
     <button class="nav2md-panel__button" type="button" data-action="exit"></button>
     <div class="nav2md-panel__shortcuts">
-      <div class="nav2md-panel__shortcuts-title" data-copy-key="shortcutsTitle"></div>
-      <div class="nav2md-panel__shortcut-row">
-        <span data-copy-key="shortcutSelectLink"></span>
-        <span class="nav2md-panel__shortcut-keys">
-          <kbd data-copy-key="shortcutClick"></kbd>
-        </span>
-      </div>
-      <div class="nav2md-panel__shortcut-row">
-        <span data-copy-key="shortcutBoxSelectLinks"></span>
-        <span class="nav2md-panel__shortcut-keys">
-          <kbd data-copy-key="shortcutShift"></kbd>
-          <span>+</span>
-          <kbd data-copy-key="shortcutDrag"></kbd>
-        </span>
-      </div>
-      <div class="nav2md-panel__shortcut-row">
-        <span data-copy-key="shortcutCloseNav2md"></span>
-        <span class="nav2md-panel__shortcut-keys">
-          <kbd data-copy-key="shortcutExit"></kbd>
-        </span>
+      <button class="nav2md-panel__shortcuts-toggle" type="button" aria-expanded="false">
+        <span data-copy-key="shortcutsTitle"></span>
+        <span class="nav2md-panel__shortcuts-caret" aria-hidden="true">+</span>
+      </button>
+      <div class="nav2md-panel__shortcut-list" hidden>
+        <div class="nav2md-panel__shortcut-row" tabindex="0">
+          <span class="nav2md-panel__shortcut-label" data-copy-key="shortcutSelectLink"></span>
+          <span class="nav2md-panel__shortcut-keys">
+            <kbd data-copy-key="shortcutClick"></kbd>
+          </span>
+        </div>
+        <div class="nav2md-panel__shortcut-row" tabindex="0">
+          <span class="nav2md-panel__shortcut-label" data-copy-key="shortcutBoxSelectLinks"></span>
+          <span class="nav2md-panel__shortcut-keys">
+            <kbd data-copy-key="shortcutShift"></kbd>
+            <span>+</span>
+            <kbd data-copy-key="shortcutDrag"></kbd>
+          </span>
+        </div>
+        <div class="nav2md-panel__shortcut-row" tabindex="0">
+          <span class="nav2md-panel__shortcut-label" data-copy-key="shortcutCloseNav2md"></span>
+          <span class="nav2md-panel__shortcut-keys">
+            <kbd data-copy-key="shortcutExit"></kbd>
+          </span>
+        </div>
       </div>
     </div>
   `;
@@ -408,7 +430,13 @@ function ensureRoot() {
   progressNode = panelNode.querySelector(".nav2md-panel__progress");
   localeSwitchNode = panelNode.querySelector(".nav2md-panel__locale-switch");
   shortcutsNode = panelNode.querySelector(".nav2md-panel__shortcuts");
+  shortcutsToggleNode = panelNode.querySelector(".nav2md-panel__shortcuts-toggle");
+  shortcutsListNode = panelNode.querySelector(".nav2md-panel__shortcut-list");
   selectedListNode = panelNode.querySelector(`#${LIST_ID}`);
+  resetSelectionButtonNode = panelNode.querySelector<HTMLButtonElement>(
+    "[data-action='reset-selection']"
+  );
+  selectAllButtonNode = panelNode.querySelector<HTMLButtonElement>("[data-action='select-all-nav']");
   exportButtonNode = panelNode.querySelector<HTMLButtonElement>("[data-action='export']");
   exitButtonNode = panelNode.querySelector<HTMLButtonElement>("[data-action='exit']");
   localeButtonNodes = Array.from(panelNode.querySelectorAll<HTMLButtonElement>("[data-locale]"));
@@ -419,6 +447,10 @@ function ensureRoot() {
     sendExportTasks().catch((error) => {
       console.error("Failed to send export tasks", error);
     });
+  });
+  shortcutsToggleNode?.addEventListener("click", () => {
+    shortcutsExpanded = !shortcutsExpanded;
+    updatePanel();
   });
 
   localeButtonNodes.forEach((button) => {
@@ -480,12 +512,17 @@ async function sendExportTasks() {
 }
 
 function updatePanel() {
-  repositionPanel();
-
   if (countLabelNode) countLabelNode.textContent = t("selected");
   if (countNode) countNode.textContent = String(selectedItems.size);
   if (statusNode) statusNode.textContent = resolveStatusText(panelStatus);
   if (shortcutsNode) shortcutsNode.setAttribute("aria-label", t("shortcutsTitle"));
+  if (shortcutsToggleNode) {
+    shortcutsToggleNode.setAttribute("aria-expanded", String(shortcutsExpanded));
+    shortcutsToggleNode.setAttribute("aria-label", t("shortcutsTitle"));
+    const caret = shortcutsToggleNode.querySelector(".nav2md-panel__shortcuts-caret");
+    if (caret) caret.textContent = shortcutsExpanded ? "-" : "+";
+  }
+  if (shortcutsListNode) shortcutsListNode.hidden = !shortcutsExpanded;
   if (localeSwitchNode) {
     localeSwitchNode.setAttribute("aria-label", t("localeSwitcherLabel"));
   }
@@ -500,6 +537,8 @@ function updatePanel() {
   if (exitButtonNode) {
     exitButtonNode.textContent = t("exit");
   }
+  if (resetSelectionButtonNode) resetSelectionButtonNode.disabled = true;
+  if (selectAllButtonNode) selectAllButtonNode.disabled = true;
   const localeLabels = getLocaleButtonLabels();
   localeButtonNodes.forEach((button) => {
     const locale = normalizeLocale(button.dataset.locale) || "zh-CN";
@@ -509,10 +548,20 @@ function updatePanel() {
   });
   shortcutCopyNodes.forEach((node) => {
     const copyKey = node.dataset.copyKey;
-    if (isTextKey(copyKey)) node.textContent = t(copyKey);
+    if (isTextKey(copyKey)) {
+      const text = t(copyKey);
+      node.textContent = text;
+      if (node.classList.contains("nav2md-panel__shortcut-label")) {
+        node.closest(".nav2md-panel__shortcut-row")?.setAttribute("data-tooltip", text);
+        node.setAttribute("aria-label", text);
+      }
+    }
   });
   const listNode = selectedListNode;
-  if (!listNode) return;
+  if (!listNode) {
+    repositionPanel();
+    return;
+  }
 
   listNode.replaceChildren();
 
@@ -521,6 +570,7 @@ function updatePanel() {
     emptyNode.className = "nav2md-panel__empty";
     emptyNode.textContent = t("noItemsSelectedYet");
     listNode.appendChild(emptyNode);
+    repositionPanel();
     return;
   }
 
@@ -540,6 +590,8 @@ function updatePanel() {
     itemNode.append(titleNode, urlNode);
     listNode.appendChild(itemNode);
   });
+
+  repositionPanel();
 }
 
 function isVisibleNavContainer(element: Element) {
@@ -1170,6 +1222,7 @@ function setSelectionMode(enabled: boolean) {
     chrome.runtime.sendMessage({ type: "NAV2MD_SELECTION_MODE_CLOSED" }).catch(() => {});
   } else {
     cachedNavContainer = null;
+    shortcutsExpanded = false;
     void hydrateLocalePreference();
     updatePanel();
   }

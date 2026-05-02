@@ -88,6 +88,17 @@ interface BoxRect {
   height: number;
 }
 
+interface LinkClusterCacheEntry {
+  cacheKey: string;
+  expiresAt: number;
+  result: boolean;
+}
+
+interface LinkClusterCandidate {
+  rect: DOMRect;
+  url: URL;
+}
+
 type BoxSelectionPhase = "idle" | "pending" | "dragging";
 
 interface BoxSelectionState {
@@ -145,6 +156,7 @@ let shouldRefreshNavContainer = false;
 let currentLocale: Locale = "zh-CN";
 let localeLoadPromise: Promise<void> | null = null;
 let localePreferenceOverride: Locale | null = null;
+const linkClusterCache = new WeakMap<Element, LinkClusterCacheEntry>();
 let panelStatus: PanelStatus = {
   running: false,
   key: "selectionModeActive"
@@ -219,9 +231,11 @@ const PANEL_MARGIN_PX = 16;
 const PANEL_GAP_PX = 12;
 const BOX_SELECT_THRESHOLD_PX = 6;
 const LINK_CLUSTER_MAX_PARENT_DEPTH = 4;
+const LINK_CLUSTER_CACHE_TTL_MS = 250;
 const LINK_CLUSTER_MIN_LINKS = 4;
 const LINK_CLUSTER_MIN_STRONG_CONTAINER_LINKS = 2;
 const LINK_CLUSTER_MIN_LEFT_LINKS = 3;
+const LINK_CLUSTER_MAX_COMPACT_LINKS = 12;
 const NAV_CONTAINER_SELECTOR =
   "aside, nav, [role='navigation'], [role='tree'], [class*='sidebar' i], [class*='sidenav' i], [class*='side-nav' i], [class*='docs-nav' i]";
 
@@ -645,20 +659,26 @@ function isLikelyDocsNavLink(link: HTMLAnchorElement, rect = link.getBoundingCli
   );
   if (navContainer) return true;
 
-  if (isLikelyDocsLinkClusterMember(link, rect)) return true;
-
   const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
   const isLeftColumn = rect.left < viewportWidth * 0.38 && rect.width < viewportWidth * 0.45;
   const looksLikeBodyLink = Boolean(link.closest("main, article, [role='main']"));
+
+  if (isLikelyDocsLinkClusterMember(link, rect, viewportWidth, looksLikeBodyLink)) return true;
+
   return isLeftColumn && !looksLikeBodyLink;
 }
 
-function isLikelyDocsLinkClusterMember(link: HTMLAnchorElement, rect: DOMRect) {
-  const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+function isLikelyDocsLinkClusterMember(
+  link: HTMLAnchorElement,
+  rect: DOMRect,
+  viewportWidth: number,
+  requireStrongContainer = false
+) {
   if (!isLeftClusterLinkRect(rect, viewportWidth)) return false;
 
   const targetUrl = parseLinkUrl(link);
   if (!targetUrl || targetUrl.origin !== location.origin) return false;
+  if (isStandaloneDocsPathLink(targetUrl, rect, viewportWidth)) return true;
 
   for (
     let depth = 0, container = link.parentElement;
@@ -670,27 +690,90 @@ function isLikelyDocsLinkClusterMember(link: HTMLAnchorElement, rect: DOMRect) {
     if (container.matches("header, footer, [role='banner'], [role='contentinfo']")) return false;
     if (container.matches("main, article, [role='main']")) continue;
 
-    const links = Array.from(container.querySelectorAll<HTMLAnchorElement>("a[href]"));
-    const validLinks = links.filter((candidate) => {
-      const candidateUrl = parseLinkUrl(candidate);
-      return candidateUrl?.origin === targetUrl.origin && isVisibleLink(candidate);
-    });
-
-    const minLinks = isStrongDocsLinkClusterContainer(container)
-      ? LINK_CLUSTER_MIN_STRONG_CONTAINER_LINKS
-      : LINK_CLUSTER_MIN_LINKS;
-    if (validLinks.length < minLinks) continue;
-
-    const leftLinks = validLinks.filter((candidate) =>
-      isLeftClusterLinkRect(candidate.getBoundingClientRect(), viewportWidth)
-    );
-    const minLeftLinks = Math.min(minLinks, LINK_CLUSTER_MIN_LEFT_LINKS);
-    if (leftLinks.length < minLeftLinks) continue;
-
-    if (hasSharedDocsPathPrefix(targetUrl, validLinks, minLeftLinks)) return true;
+    if (isDocsLinkClusterContainer(container, targetUrl, viewportWidth, requireStrongContainer)) {
+      return true;
+    }
   }
 
   return false;
+}
+
+function isDocsLinkClusterContainer(
+  container: Element,
+  targetUrl: URL,
+  viewportWidth: number,
+  requireStrongContainer: boolean
+) {
+  const now = window.performance.now();
+  const cacheKey = getLinkClusterCacheKey(targetUrl, viewportWidth, requireStrongContainer);
+  const cached = linkClusterCache.get(container);
+  if (cached && cached.cacheKey === cacheKey && cached.expiresAt > now) return cached.result;
+
+  const result = computeDocsLinkClusterContainer(
+    container,
+    targetUrl,
+    viewportWidth,
+    requireStrongContainer
+  );
+  linkClusterCache.set(container, {
+    cacheKey,
+    expiresAt: now + LINK_CLUSTER_CACHE_TTL_MS,
+    result
+  });
+  return result;
+}
+
+function computeDocsLinkClusterContainer(
+  container: Element,
+  targetUrl: URL,
+  viewportWidth: number,
+  requireStrongContainer: boolean
+) {
+  const links = Array.from(container.querySelectorAll<HTMLAnchorElement>("a[href]"));
+  const validLinks = links.reduce<LinkClusterCandidate[]>((items, candidate) => {
+    const candidateUrl = parseLinkUrl(candidate);
+    if (candidateUrl?.origin !== targetUrl.origin) return items;
+
+    const rect = candidate.getBoundingClientRect();
+    if (rect.width >= 12 && rect.height >= 8) {
+      items.push({ rect, url: candidateUrl });
+    }
+    return items;
+  }, []);
+
+  const hasStrongSignal = isStrongDocsLinkClusterContainer(container);
+  const minLinks = hasStrongSignal || requireStrongContainer
+    ? LINK_CLUSTER_MIN_STRONG_CONTAINER_LINKS
+    : LINK_CLUSTER_MIN_LINKS;
+  if (validLinks.length < minLinks) return false;
+
+  let leftLinkCount = 0;
+  for (const candidate of validLinks) {
+    if (isLeftClusterLinkRect(candidate.rect, viewportWidth)) {
+      leftLinkCount += 1;
+    }
+  }
+
+  const minLeftLinks = Math.min(minLinks, LINK_CLUSTER_MIN_LEFT_LINKS);
+  if (leftLinkCount < minLeftLinks) return false;
+
+  const hasSharedPathPrefix = hasSharedDocsPathPrefix(targetUrl, validLinks, minLeftLinks);
+  if (!hasSharedPathPrefix) return false;
+
+  return (
+    !requireStrongContainer ||
+    hasStrongSignal ||
+    isCompactDocsLinkGroup(container, validLinks, viewportWidth)
+  );
+}
+
+function getLinkClusterCacheKey(
+  targetUrl: URL,
+  viewportWidth: number,
+  requireStrongContainer: boolean
+) {
+  const prefix = getPathSegments(targetUrl).slice(0, 2).join("/");
+  return `${targetUrl.origin}|${prefix}|${Math.round(viewportWidth)}|${requireStrongContainer}`;
 }
 
 function parseLinkUrl(link: HTMLAnchorElement) {
@@ -702,11 +785,6 @@ function parseLinkUrl(link: HTMLAnchorElement) {
   } catch {
     return null;
   }
-}
-
-function isVisibleLink(link: HTMLAnchorElement) {
-  const rect = link.getBoundingClientRect();
-  return rect.width >= 12 && rect.height >= 8;
 }
 
 function isLeftClusterLinkRect(rect: DOMRect, viewportWidth: number) {
@@ -730,16 +808,39 @@ function isStrongDocsLinkClusterContainer(element: Element) {
   );
 }
 
-function hasSharedDocsPathPrefix(targetUrl: URL, links: HTMLAnchorElement[], minMatches: number) {
+function isStandaloneDocsPathLink(targetUrl: URL, rect: DOMRect, viewportWidth: number) {
+  const segments = getPathSegments(targetUrl);
+  if (segments.length < 3) return false;
+  if (!isLeftClusterLinkRect(rect, viewportWidth)) return false;
+
+  const currentSegments = getPathSegments(new URL(location.href));
+  if (currentSegments.length < 2) return false;
+
+  return segments[0] === currentSegments[0] && segments[1] === currentSegments[1];
+}
+
+function isCompactDocsLinkGroup(
+  container: Element,
+  links: LinkClusterCandidate[],
+  viewportWidth: number
+) {
+  if (links.length < LINK_CLUSTER_MIN_STRONG_CONTAINER_LINKS) return false;
+  if (links.length > LINK_CLUSTER_MAX_COMPACT_LINKS) return false;
+
+  const rect = container.getBoundingClientRect();
+  if (!isLeftClusterLinkRect(rect, viewportWidth)) return false;
+
+  const averageLinkHeight = rect.height / links.length;
+  return averageLinkHeight >= 24 && averageLinkHeight <= 80;
+}
+
+function hasSharedDocsPathPrefix(targetUrl: URL, links: LinkClusterCandidate[], minMatches: number) {
   const targetSegments = getPathSegments(targetUrl);
   if (targetSegments.length === 0) return false;
 
   const prefixLength = Math.min(targetSegments.length, 2);
-  const matchingLinks = links.filter((link) => {
-    const candidateUrl = parseLinkUrl(link);
-    if (!candidateUrl || candidateUrl.origin !== targetUrl.origin) return false;
-
-    const candidateSegments = getPathSegments(candidateUrl);
+  const matchingLinks = links.filter((candidate) => {
+    const candidateSegments = getPathSegments(candidate.url);
     if (candidateSegments.length < prefixLength) return false;
 
     return targetSegments

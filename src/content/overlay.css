@@ -322,7 +322,18 @@
 }
 
 [data-nav2md-selected="true"] {
-  outline: none !important;
   background-color: rgba(15, 118, 110, 0.08) !important;
   box-shadow: inset 0 0 0 2px #0f766e !important;
+}
+
+[data-nav2md-selected="true"]:not(:focus-visible) {
+  outline: none !important;
+}
+
+[data-nav2md-selected="true"]:focus-visible {
+  outline: 2px solid rgba(45, 212, 191, 0.9) !important;
+  outline-offset: -2px !important;
+  box-shadow:
+    inset 0 0 0 2px #0f766e,
+    inset 0 0 0 4px rgba(15, 118, 110, 0.35) !important;
 }

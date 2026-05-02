@@ -90,5 +90,21 @@
 - Verified:
   - `npm run typecheck`
   - `npm run build`
+- Reviewed two CR findings and adopted both:
+  - blocked native link drag during box selection
+  - used pointer capture and pointer cancel cleanup for release reliability
   - `npm run lint`
 - Next checkpoint: load `dist` as the unpacked extension and validate on real docs pages.
+
+## 2026-05-02
+
+### Session 7
+
+- Planned the `Shift + mouse drag` box selection shortcut.
+- Confirmed box selection should add links only, keep existing selections, and hide the panel only after the drag threshold.
+- Created the feature design and implementation plan documents.
+- Started implementation on branch `codex/shift-box-selection`.
+- Implemented box selection in the content script and overlay CSS.
+- Verified:
+  - `npm run typecheck`
+  - `npm run build`

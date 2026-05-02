@@ -630,11 +630,10 @@ function resolveCandidate(target: EventTarget | null): HTMLAnchorElement | null 
   return navItem && isLikelyDocsNavLink(navItem) ? navItem : null;
 }
 
-function isLikelyDocsNavLink(link: HTMLAnchorElement) {
+function isLikelyDocsNavLink(link: HTMLAnchorElement, rect = link.getBoundingClientRect()) {
   const href = link.getAttribute("href");
   if (!href || href.startsWith("#") || href.startsWith("javascript:")) return false;
 
-  const rect = link.getBoundingClientRect();
   if (rect.width < 12 || rect.height < 8) return false;
 
   const navContainer = link.closest(
@@ -798,10 +797,12 @@ function cancelBoxSelection() {
 
 function completeBoxSelection() {
   const selectionRect = getBoxSelectionRect();
+  const scanRoot: ParentNode = findBestNavContainer() || document;
 
-  document.querySelectorAll<HTMLAnchorElement>("a[href]").forEach((link) => {
-    if (!isLikelyDocsNavLink(link)) return;
-    if (!rectsIntersect(selectionRect, link.getBoundingClientRect())) return;
+  scanRoot.querySelectorAll<HTMLAnchorElement>("a[href]").forEach((link) => {
+    const rect = link.getBoundingClientRect();
+    if (!isLikelyDocsNavLink(link, rect)) return;
+    if (!rectsIntersect(selectionRect, rect)) return;
 
     addSelectedItem(link);
   });

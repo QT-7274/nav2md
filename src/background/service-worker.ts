@@ -107,6 +107,7 @@ chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
       startExportJob({
         tasks: message.tasks,
         sourceTabId: sender.tab?.id ?? null,
+        sourceTitle: sender.tab?.title ?? "",
         sourceUrl: sender.tab?.url ?? ""
       })
     );

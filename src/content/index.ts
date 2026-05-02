@@ -163,6 +163,10 @@ let currentLocale: Locale = "zh-CN";
 let localeLoadPromise: Promise<void> | null = null;
 let localePreferenceOverride: Locale | null = null;
 let shortcutsExpanded = false;
+let hasSelectableNavLinks = false;
+let selectableNavLinksCacheExpiresAt = 0;
+let selectableNavLinksRefreshTimerId: number | null = null;
+let shouldRefreshSelectableNavContainer = false;
 const linkClusterCache = new WeakMap<Element, LinkClusterCacheEntry>();
 let panelStatus: PanelStatus = {
   running: false,
@@ -241,6 +245,8 @@ const COPY: Record<Locale, PanelCopy> = {
 const PANEL_MARGIN_PX = 16;
 const PANEL_GAP_PX = 12;
 const BOX_SELECT_THRESHOLD_PX = 6;
+const SELECTABLE_NAV_LINKS_CACHE_TTL_MS = 1000;
+const SELECTABLE_NAV_LINKS_REFRESH_DELAY_MS = 100;
 const LINK_CLUSTER_MAX_PARENT_DEPTH = 4;
 const LINK_CLUSTER_CACHE_TTL_MS = 250;
 const LINK_CLUSTER_MIN_LINKS = 4;
@@ -308,6 +314,51 @@ function setPanelStatus(status: PanelStatus) {
   panelStatus = status;
   exportRunning = status.running;
   updatePanel();
+}
+
+function updateSelectionActionButtons() {
+  if (resetSelectionButtonNode) {
+    resetSelectionButtonNode.disabled = selectedItems.size === 0 || panelStatus.running;
+  }
+  if (selectAllButtonNode) {
+    selectAllButtonNode.disabled = panelStatus.running || !hasSelectableNavLinks;
+  }
+}
+
+function clearSelectableNavLinksRefresh() {
+  if (selectableNavLinksRefreshTimerId === null) return;
+
+  window.clearTimeout(selectableNavLinksRefreshTimerId);
+  selectableNavLinksRefreshTimerId = null;
+}
+
+function invalidateSelectableNavLinksCache(refreshNavContainer = false) {
+  hasSelectableNavLinks = false;
+  selectableNavLinksCacheExpiresAt = 0;
+  shouldRefreshSelectableNavContainer = shouldRefreshSelectableNavContainer || refreshNavContainer;
+  updateSelectionActionButtons();
+  scheduleSelectableNavLinksRefresh(refreshNavContainer);
+}
+
+function scheduleSelectableNavLinksRefresh(refreshNavContainer = false) {
+  if (!selectionEnabled || panelStatus.running) return;
+
+  const now = window.performance.now();
+  shouldRefreshSelectableNavContainer = shouldRefreshSelectableNavContainer || refreshNavContainer;
+  if (!refreshNavContainer && now < selectableNavLinksCacheExpiresAt) return;
+  if (selectableNavLinksRefreshTimerId !== null) return;
+
+  selectableNavLinksRefreshTimerId = window.setTimeout(() => {
+    const refresh = shouldRefreshSelectableNavContainer;
+    selectableNavLinksRefreshTimerId = null;
+    shouldRefreshSelectableNavContainer = false;
+    if (!selectionEnabled || panelStatus.running) return;
+
+    hasSelectableNavLinks = hasAnySelectableNavLink(refresh);
+    selectableNavLinksCacheExpiresAt =
+      window.performance.now() + SELECTABLE_NAV_LINKS_CACHE_TTL_MS;
+    updateSelectionActionButtons();
+  }, SELECTABLE_NAV_LINKS_REFRESH_DELAY_MS);
 }
 
 function normalizeLocale(value: unknown): Locale | null {
@@ -448,6 +499,8 @@ function ensureRoot() {
       console.error("Failed to send export tasks", error);
     });
   });
+  resetSelectionButtonNode?.addEventListener("click", resetSelection);
+  selectAllButtonNode?.addEventListener("click", selectAllNavLinks);
   shortcutsToggleNode?.addEventListener("click", () => {
     shortcutsExpanded = !shortcutsExpanded;
     updatePanel();
@@ -537,8 +590,8 @@ function updatePanel() {
   if (exitButtonNode) {
     exitButtonNode.textContent = t("exit");
   }
-  if (resetSelectionButtonNode) resetSelectionButtonNode.disabled = true;
-  if (selectAllButtonNode) selectAllButtonNode.disabled = true;
+  updateSelectionActionButtons();
+  scheduleSelectableNavLinksRefresh();
   const localeLabels = getLocaleButtonLabels();
   localeButtonNodes.forEach((button) => {
     const locale = normalizeLocale(button.dataset.locale) || "zh-CN";
@@ -676,6 +729,10 @@ function repositionPanel(refreshNavContainer = false) {
 }
 
 function scheduleRepositionPanel(refreshNavContainer = false) {
+  if (refreshNavContainer) {
+    invalidateSelectableNavLinksCache(true);
+  }
+
   shouldRefreshNavContainer = shouldRefreshNavContainer || refreshNavContainer;
   if (repositionFrameId !== null) return;
 
@@ -978,6 +1035,63 @@ function toggleSelectedItem(target: HTMLAnchorElement) {
   updatePanel();
 }
 
+function resetSelection() {
+  if (selectedItems.size === 0 || panelStatus.running) return;
+
+  selectedItems.clear();
+  updateSelectionStyles();
+  updatePanel();
+}
+
+function isSelectableNavLinkCandidate(link: HTMLAnchorElement) {
+  const href = link.getAttribute("href");
+  return Boolean(href && !href.startsWith("#") && !href.startsWith("javascript:"));
+}
+
+function hasAnySelectableNavLink(refreshNavContainer = false) {
+  const scanRoot: ParentNode = findBestNavContainer(refreshNavContainer) || document;
+
+  return Array.from(scanRoot.querySelectorAll<HTMLAnchorElement>("a[href]")).some((link) => {
+    if (!isSelectableNavLinkCandidate(link) || !getSelectionKey(link)) return false;
+
+    return isLikelyDocsNavLink(link);
+  });
+}
+
+function getSelectableNavLinks(refreshNavContainer = false) {
+  const scanRoot: ParentNode = findBestNavContainer(refreshNavContainer) || document;
+  const seenKeys = new Set<string>();
+
+  return Array.from(scanRoot.querySelectorAll<HTMLAnchorElement>("a[href]")).filter((link) => {
+    const key = getSelectionKey(link);
+    if (!key || !isSelectableNavLinkCandidate(link) || seenKeys.has(key)) return false;
+
+    const rect = link.getBoundingClientRect();
+    if (!isLikelyDocsNavLink(link, rect)) return false;
+
+    seenKeys.add(key);
+    return true;
+  });
+}
+
+function selectAllNavLinks() {
+  if (panelStatus.running) return;
+
+  let changed = false;
+  const selectableLinks = getSelectableNavLinks(true);
+  selectableLinks.forEach((link) => {
+    changed = addSelectedItem(link) || changed;
+  });
+
+  hasSelectableNavLinks = selectableLinks.length > 0;
+  selectableNavLinksCacheExpiresAt = window.performance.now() + SELECTABLE_NAV_LINKS_CACHE_TTL_MS;
+
+  if (changed) {
+    updateSelectionStyles();
+  }
+  updatePanel();
+}
+
 function getBoxSelectionRect(): BoxRect {
   const left = Math.min(boxSelectionState.start.x, boxSelectionState.current.x);
   const top = Math.min(boxSelectionState.start.y, boxSelectionState.current.y);
@@ -1204,6 +1318,8 @@ function setSelectionMode(enabled: boolean) {
   if (panelNode) panelNode.hidden = !enabled;
   if (!enabled) {
     resetBoxSelection(false);
+    clearSelectableNavLinksRefresh();
+    invalidateSelectableNavLinksCache();
     cachedNavContainer = null;
     currentTarget = null;
     exportRunning = false;
@@ -1222,6 +1338,7 @@ function setSelectionMode(enabled: boolean) {
     chrome.runtime.sendMessage({ type: "NAV2MD_SELECTION_MODE_CLOSED" }).catch(() => {});
   } else {
     cachedNavContainer = null;
+    invalidateSelectableNavLinksCache(true);
     shortcutsExpanded = false;
     void hydrateLocalePreference();
     updatePanel();
